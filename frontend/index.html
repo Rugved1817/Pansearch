@@ -117,7 +117,7 @@
 	// Use localhost when opened via file://, otherwise keep same host at port 8000
 	const API_BASE = (location.protocol === 'file:') ? 'http://localhost:8000' : `${location.protocol}//${location.hostname || 'localhost'}:8000`;
 	const el = id => document.getElementById(id);
-	let state = { rows: [], cols: [], page: 1, pageSize: 100 };
+	let state = { rows: [], colsDisplay: [], colMap: {}, page: 1, pageSize: 100 };
 
 	function showToast(msg){ const t = el('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'), 2200); }
 	function setStatus(msg){ el('stat').textContent = msg; }
@@ -154,9 +154,44 @@
 			if (!res.ok) throw new Error(await res.text());
 			const json = await res.json();
 			state.rows = json.data || [];
-			// Build visible columns but hide helper highlight fields
-			const allCols = state.rows.length ? Object.keys(state.rows[0]) : [];
-			state.cols = allCols.filter(c => !['name_hit_field','name_hit_snippet','name_hit_snippet_html','pan_hit_field','pan_hit_snippet_html'].includes(c));
+			// If PAN provided, fetch Name/Age from external API and inject into rows
+			let metaName = null, metaAge = null;
+			if (pan) {
+				try {
+					const ext = await fetch(`${API_BASE}/pan_meta?` + new URLSearchParams({ pan }));
+					if (ext.ok) {
+						const ej = await ext.json().catch(()=>({}));
+						// Expect normalized keys from proxy
+						metaName = ej.name ?? null;
+						metaAge = ej.age ?? null;
+						// Normalize to primitives
+						if (typeof metaName !== 'string') metaName = metaName != null ? String(metaName) : null;
+						if (typeof metaAge !== 'number') {
+							const parsed = ej && (ej.age ?? ej.Age);
+							const n = Number(parsed);
+							metaAge = Number.isFinite(n) ? n : (parsed != null ? String(parsed) : null);
+						}
+						if (metaName != null || metaAge != null) {
+							for (const r of state.rows) { r["Name"] = metaName ?? ''; r["Age"] = metaAge ?? ''; }
+						}
+					} else {
+						// Non-fatal if metadata API fails
+						console.warn('Meta API failed', await ext.text());
+					}
+				} catch (e) {
+					console.warn('Meta API error', e);
+				}
+			}
+			// Lock table to exactly these columns in this order
+			const desired = [
+				{ header: 'PAN', key: 'pan_numbers' },
+				{ header: 'Buyer', key: 'buyer' },
+				{ header: 'Seller', key: 'seller' },
+				{ header: 'Name', key: 'Name' },
+				{ header: 'Age', key: 'Age' },
+			];
+			state.colsDisplay = desired.map(d => d.header);
+			state.colMap = Object.fromEntries(desired.map(d => [d.header, d.key]));
 			state.page = 1;
 			render();
 			setStatus(`Found ${state.rows.length.toLocaleString()} rows`);
@@ -180,20 +215,21 @@
 		table.style.display='table';
 		const thead = document.createElement('thead');
 		const htr = document.createElement('tr');
-		for (const c of state.cols){ const th = document.createElement('th'); th.textContent = c; htr.appendChild(th); }
+		for (const c of state.colsDisplay){ const th = document.createElement('th'); th.textContent = c; htr.appendChild(th); }
 		thead.appendChild(htr);
 		table.appendChild(thead);
 		const tbody = document.createElement('tbody');
 		const pageRows = paginate(state.rows, state.page, state.pageSize);
 		for (const r of pageRows){
 			const tr = document.createElement('tr');
-			for (const c of state.cols){
+			for (const c of state.colsDisplay){
 				const td = document.createElement('td');
-				const v = r[c];
-				// If this column is the hit field, render the HTML snippet with <mark>
-				if (r.name_hit_field === c && r.name_hit_snippet_html){
+				const key = state.colMap[c];
+				const v = r[key];
+				// If this column maps to the hit field, render the HTML snippet with <mark>
+				if (r.name_hit_field === key && r.name_hit_snippet_html){
 					td.innerHTML = String(r.name_hit_snippet_html);
-				} else if (r.pan_hit_field === c && r.pan_hit_snippet_html){
+				} else if (r.pan_hit_field === key && r.pan_hit_snippet_html){
 					td.innerHTML = String(r.pan_hit_snippet_html);
 				} else {
 					td.textContent = (v!==null && v!==undefined) ? String(v).slice(0, 500) : '';
@@ -210,10 +246,10 @@
 
 	function exportCSV(){
 		if (!state.rows.length){ showToast('No data'); return; }
-		const cols = state.cols;
+		const cols = state.colsDisplay;
 		const lines = [];
 		lines.push(cols.map(safeCsv).join(','));
-		for (const r of state.rows){ lines.push(cols.map(c=>safeCsv(r[c])).join(',')); }
+		for (const r of state.rows){ lines.push(cols.map(c=>safeCsv(r[state.colMap[c]])).join(',')); }
 		const blob = new Blob([lines.join('\n')], {type:'text/csv;charset=utf-8;'});
 		const url = URL.createObjectURL(blob);
 		const a = document.createElement('a');

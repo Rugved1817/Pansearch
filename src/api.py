@@ -1,6 +1,9 @@
 import os
 from typing import List, Optional
 import re
+import json
+import urllib.parse
+import urllib.request
 
 import duckdb
 from fastapi import FastAPI, HTTPException, Query
@@ -166,5 +169,37 @@ def search(
 		return {"count": len(rows), "data": data}
 
 	finally:
-     
 		con.close()
+
+
+@app.get("/pan_meta")
+def pan_meta(pan: str = Query(..., description="PAN to fetch metadata for")) -> dict:
+	if not pan:
+		raise HTTPException(status_code=400, detail="pan required")
+	pan_id = nlp.canonicalize_pan(pan)
+	if not pan_id:
+		raise HTTPException(status_code=400, detail="invalid pan")
+	base_url = "http://192.168.1.198:5000/get_by_id"
+	url = f"{base_url}?" + urllib.parse.urlencode({"id": pan_id})
+	try:
+		with urllib.request.urlopen(url, timeout=5) as resp:
+			payload = resp.read()
+			try:
+				data = json.loads(payload.decode("utf-8"))
+			except Exception:
+				data = {}
+		# Normalize keys
+		name = data.get("name") or data.get("Name") or data.get("full_name") or data.get("fullName")
+		age = data.get("age") if "age" in data else data.get("Age") if "Age" in data else data.get("person_age")
+		# Coerce simple types
+		if name is not None and not isinstance(name, str):
+			name = str(name)
+		if age is not None and not isinstance(age, (int, float)):
+			try:
+				age_num = int(str(age))
+				age = age_num
+			except Exception:
+				pass
+		return {"pan": pan_id, "name": name, "age": age, "raw": data}
+	except Exception as e:
+		raise HTTPException(status_code=502, detail=f"upstream error: {e}")
