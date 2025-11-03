@@ -19,7 +19,7 @@
 		* { box-sizing: border-box; }
 		html, body { height: 100%; }
 		body { margin: 0; background: linear-gradient(180deg, #0b0f14, #0a0d12); color: var(--text); font-family: "Inter", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
-		.container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+		.container { max-width: 1600px; margin: 0 auto; padding: 24px; }
 		h1 { font-size: 20px; margin: 0 0 16px; letter-spacing: 0.3px; color: #dbe7f3; }
 		.header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 		.badge { background: linear-gradient(135deg, #1a2330, #121a24); padding: 6px 10px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: 12px; }
@@ -45,7 +45,7 @@
 		.table-wrap { margin-top: 16px; background: #0c1219; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
 		table { width: 100%; border-collapse: collapse; }
 		thead th { position: sticky; top: 0; background: #101824; color: #c8d6e5; font-weight: 600; font-size: 12px; text-align: left; padding: 10px; border-bottom: 1px solid var(--border); }
-		tbody td { padding: 10px; border-bottom: 1px solid #141b25; font-size: 12px; color: #d6e2ef; }
+			tbody td { padding: 10px; border-bottom: 1px solid #141b25; font-size: 12px; color: #d6e2ef; white-space: pre-wrap; word-break: break-word; }
 		tbody tr:hover { background: #0f1823; }
 
 		.pagination { display: flex; gap: 8px; align-items: center; justify-content: flex-end; padding: 10px; border-top: 1px solid var(--border); }
@@ -116,8 +116,8 @@
 	<script>
 	// Use localhost when opened via file://, otherwise keep same host at port 8000
 	const API_BASE = (location.protocol === 'file:') ? 'http://localhost:8000' : `${location.protocol}//${location.hostname || 'localhost'}:8000`;
-	const el = id => document.getElementById(id);
-	let state = { rows: [], colsDisplay: [], colMap: {}, page: 1, pageSize: 100 };
+		const el = id => document.getElementById(id);
+		let state = { rows: [], colsDisplay: [], colMap: {}, page: 1, pageSize: 100, lastQueryPan: null, lastQuerySeed: null };
 
 	function showToast(msg){ const t = el('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'), 2200); }
 	function setStatus(msg){ el('stat').textContent = msg; }
@@ -154,6 +154,8 @@
 			if (!res.ok) throw new Error(await res.text());
 			const json = await res.json();
 			state.rows = json.data || [];
+			state.lastQueryPan = pan || null;
+			state.lastQuerySeed = seed || null;
 			// If PAN provided, fetch Name/Age from external API and inject into rows
 			let metaName = null, metaAge = null;
 			if (pan) {
@@ -229,10 +231,33 @@
 				// If this column maps to the hit field, render the HTML snippet with <mark>
 				if (r.name_hit_field === key && r.name_hit_snippet_html){
 					td.innerHTML = String(r.name_hit_snippet_html);
-				} else if (r.pan_hit_field === key && r.pan_hit_snippet_html){
-					td.innerHTML = String(r.pan_hit_snippet_html);
+				} else if (key === 'pan_numbers'){
+					// Always show full PAN in one line, with highlight if searched by PAN
+					const text = (v!==null && v!==undefined) ? String(v) : '';
+					const panQ = (state.lastQueryPan || '').toUpperCase();
+					if (panQ && text.toUpperCase().includes(panQ)){
+						const esc = (s)=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+						const re = new RegExp(panQ.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'), 'gi');
+						td.innerHTML = esc(text).replace(re, m=>`<mark>${m}</mark>`);
+					} else {
+						td.textContent = text;
+					}
+					td.style.whiteSpace = 'nowrap';
+					td.style.wordBreak = 'normal';
+				} else if (state.lastQueryPan && typeof v === 'string' && v){
+					// For PAN searches, highlight PAN anywhere in Buyer/Seller without truncating
+					const panQ = (state.lastQueryPan || '').toUpperCase();
+					const text = String(v);
+					const esc = (s)=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+					const re = new RegExp(panQ.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'), 'gi');
+					if (panQ && text.toUpperCase().includes(panQ)){
+						td.innerHTML = esc(text).replace(re, m=>`<mark>${m}</mark>`);
+					} else {
+						td.textContent = text;
+					}
 				} else {
-					td.textContent = (v!==null && v!==undefined) ? String(v).slice(0, 500) : '';
+					// Show full content for all fields (no truncation), so Buyer/Seller are complete
+					td.textContent = (v!==null && v!==undefined) ? String(v) : '';
 				}
 				tr.appendChild(td);
 			}
