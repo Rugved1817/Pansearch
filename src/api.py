@@ -1,9 +1,11 @@
 import os
+import logging
 from typing import List, Optional
 import re
 import json
 import urllib.parse
 import urllib.request
+from openai import OpenAI
 
 import duckdb
 from fastapi import FastAPI, HTTPException, Query
@@ -29,6 +31,10 @@ except ImportError:
     )
 
 DB_PATH = os.getenv("TX_DB_PATH", "data/tx.duckdb")
+
+# Basic logging config
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logger = logging.getLogger("pansearch.api")
 
 app = FastAPI(title="Transactions Search API", version="0.1.0")
 app.add_middleware(
@@ -172,6 +178,68 @@ def search(
 		con.close()
 
 
+def _extract_person_name_llm(raw_name: str) -> Optional[str]:
+	"""
+	Use local LLM (OpenAI-compatible API via Ollama) to extract the main human person's name
+	from a longer Marathi/English phrase. Returns a concise name or None on failure.
+	"""
+	if not raw_name:
+		return None
+	try:
+		base_url = os.getenv("LLM_BASE_URL", "http://192.168.1.198:11434/v1")
+		api_key = os.getenv("LLM_API_KEY", "ollama")
+		model = os.getenv("LLM_MODEL", "gpt-oss:20b")
+		client = OpenAI(base_url=base_url, api_key=api_key)
+		system_prompt = "Return JSON only. You extract concise person names."
+		user_prompt = (
+			"Extract only the main human person's name from the text.\n"
+			"- Text may include roles (e.g., संचालक, तर्फे), organizations, or punctuation.\n"
+			"- Preserve the script (Marathi remains Marathi, English remains English).\n"
+			"- Respond ONLY as compact JSON: {\\\"name\\\": \\\"<NAME>\\\"}. No extra text.\n\n"
+			f"Text: {raw_name}"
+		)
+		resp = client.chat.completions.create(
+			model=model,
+			messages=[
+				{"role": "system", "content": system_prompt},
+				{"role": "user", "content": user_prompt},
+			],
+			temperature=0,
+			max_tokens=64,
+		)
+		text = (resp.choices[0].message.content or "").strip()
+		if not text:
+			logger.warning("LLM returned empty content for extraction")
+		# Parse JSON strictly; tolerate minor wrappers
+		name_val = None
+		try:
+			obj = json.loads(text)
+			name_val = obj.get("name")
+		except Exception:
+			# try to find a minimal JSON snippet in the text
+			m = re.search(r"\{\s*\"name\"\s*:\s*\"(.+?)\"\s*\}", text)
+			if m:
+				name_val = m.group(1)
+		if name_val:
+			name_val = str(name_val).strip().strip('"\'\u201c\u201d')
+			if 0 < len(name_val) <= 60:
+				return name_val
+		# Fallback heuristic for Marathi phrases: pick last 2 tokens that are not role/stop words
+		stop = {"चे","चा","ची","चे","प्रा","ली","लि","अँड","एंड","तर्फे","संचालक","मुखत्यार","प्रा.","लि.","कंपनी","लिमिटेड","प्रा.लि."}
+		words = re.split(r"\s+", raw_name.strip())
+		filtered = [w for w in words if w and (re.sub(r"[\,;:\-]", "", w) not in stop)]
+		if len(filtered) >= 1:
+			cand = " ".join(filtered[-2:]) if len(filtered) >= 2 else filtered[-1]
+			cand = cand.strip()
+			if 0 < len(cand) <= 60:
+				logger.info("LLM fallback heuristic used for extraction")
+				return cand
+		return None
+	except Exception as e:
+		logger.exception("LLM extraction failed: %s", e)
+		return None
+
+
 @app.get("/pan_meta")
 def pan_meta(pan: str = Query(..., description="PAN to fetch metadata for")) -> dict:
 	if not pan:
@@ -200,6 +268,22 @@ def pan_meta(pan: str = Query(..., description="PAN to fetch metadata for")) -> 
 				age = age_num
 			except Exception:
 				pass
-		return {"pan": pan_id, "name": name, "age": age, "raw": data}
+		# LLM extraction for a concise human name
+		extracted = _extract_person_name_llm(name or "") if name else None
+		final_name = extracted or name
+		extraction_error = None if (extracted is not None) else ("llm_extraction_failed" if name else None)
+		return {"pan": pan_id, "name": final_name, "extracted_name": extracted, "raw_name": name, "age": age, "raw": data, "extraction_error": extraction_error}
 	except Exception as e:
+		logger.exception("PAN meta upstream error for %s: %s", pan_id, e)
 		raise HTTPException(status_code=502, detail=f"upstream error: {e}")
+
+
+@app.get("/llm_test")
+def llm_test(text: str = Query(..., description="Sample text to extract name from")) -> dict:
+	"""Simple endpoint to verify LLM extraction end-to-end."""
+	try:
+		extracted = _extract_person_name_llm(text)
+		return {"input": text, "extracted": extracted}
+	except Exception as e:
+		logger.exception("LLM test failed: %s", e)
+		return {"input": text, "extracted": None}

@@ -87,6 +87,7 @@
 			</div>
 			<div class="toolbar">
 				<span id="stat" class="stat">Ready</span>
+				<span id="extracted" class="stat" style="display:none;"></span>
 				<div style="margin-left:auto; display:flex; gap:8px; align-items:center;">
 					<label class="label" style="margin:0;">Page size</label>
 					<select id="pageSize" class="select">
@@ -117,7 +118,7 @@
 	// Use localhost when opened via file://, otherwise keep same host at port 8000
 	const API_BASE = (location.protocol === 'file:') ? 'http://localhost:8000' : `${location.protocol}//${location.hostname || 'localhost'}:8000`;
 	const el = id => document.getElementById(id);
-	let state = { rows: [], colsDisplay: [], colMap: {}, page: 1, pageSize: 100 };
+			let state = { rows: [], colsDisplay: [], colMap: {}, page: 1, pageSize: 100 };
 
 	function showToast(msg){ const t = el('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'), 2200); }
 	function setStatus(msg){ el('stat').textContent = msg; }
@@ -162,7 +163,7 @@
 					if (ext.ok) {
 						const ej = await ext.json().catch(()=>({}));
 						// Expect normalized keys from proxy
-						metaName = ej.name ?? null;
+						metaName = (ej.extracted_name ?? ej.name) ?? null;
 						metaAge = ej.age ?? null;
 						// Normalize to primitives
 						if (typeof metaName !== 'string') metaName = metaName != null ? String(metaName) : null;
@@ -173,6 +174,12 @@
 						}
 						if (metaName != null || metaAge != null) {
 							for (const r of state.rows) { r["Name"] = metaName ?? ''; r["Age"] = metaAge ?? ''; }
+						}
+						// Show extracted name badge
+						if (metaName) {
+							const ex = el('extracted');
+							ex.style.display = 'inline-block';
+							ex.textContent = `Extracted Name: ${metaName}`;
 						}
 					} else {
 						// Non-fatal if metadata API fails
@@ -232,7 +239,7 @@
 				} else if (r.pan_hit_field === key && r.pan_hit_snippet_html){
 					td.innerHTML = String(r.pan_hit_snippet_html);
 				} else {
-					td.textContent = (v!==null && v!==undefined) ? String(v).slice(0, 500) : '';
+					td.textContent = (v!==null && v!==undefined) ? String(v) : '';
 				}
 				tr.appendChild(td);
 			}
