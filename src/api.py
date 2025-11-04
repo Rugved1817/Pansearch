@@ -51,16 +51,116 @@ def health() -> dict:
 	return {"status": "ok"}
 
 
+def _generate_name_variations_llm(input_name: str) -> dict:
+	"""
+	Use LLM to generate realistic name variations in both English and Marathi.
+	Returns dict with 'english_variants' and 'marathi_variants' lists.
+	"""
+	if not input_name:
+		return {"english_variants": [], "marathi_variants": []}
+	
+	try:
+		client = OpenAI(
+			base_url="http://192.168.1.198:11434/v1",
+			api_key="ollama"
+		)
+		
+		system_prompt = (
+			"You are an expert in Indian name transliteration, phonetic spelling, and linguistic normalization.\n"
+			"Your task is to generate **both English and Marathi (Devanagari)** name variations for the given input.\n\n"
+			"### Instructions:\n"
+			"1. Detect automatically whether the input name is in English or Marathi (Devanagari).\n"
+			"2. Generate realistic **real-world spelling and phonetic variations** (as commonly seen in official documents like PAN, Aadhaar, voter ID, etc.).\n"
+			"3. If the input is in English → return Marathi (Devanagari) transliterations and variations.\n"
+			"   If the input is in Marathi → return English transliterations and variations.\n"
+			"4. Preserve correct pronunciation and avoid random or invalid spellings.\n"
+			"5. Return results in structured **JSON** format.\n\n"
+			"### Output Format:\n"
+			"{\n"
+			'  "original_name": "<input name>",\n'
+			'  "english_variants": [list of realistic English/phonetic variants],\n'
+			'  "marathi_variants": [list of Marathi spelling variants]\n'
+			"}\n\n"
+			"### Notes:\n"
+			"- Handle long vowels (aa vs a, ee vs i, oo vs u)\n"
+			"- Handle \"Shree / Shri / Sri / Sree\" patterns\n"
+			"- Handle Marathi pronunciation for ढ, ठ, ण, ं, etc.\n"
+			"- Avoid gibberish or transliteration errors"
+		)
+		
+		user_prompt = f"### Input:\n{input_name}\n\n### Output:"
+		
+		resp = client.chat.completions.create(
+			model="gpt-oss:20b",
+			messages=[
+				{"role": "system", "content": system_prompt},
+				{"role": "user", "content": user_prompt},
+			],
+			temperature=0,
+		)
+		
+		text = (resp.choices[0].message.content or "").strip()
+		if not text:
+			logger.warning("LLM returned empty content for name variations")
+			return {"english_variants": [], "marathi_variants": []}
+		
+		# Try to parse JSON from response
+		result = None
+		try:
+			result = json.loads(text)
+		except Exception:
+			# Try to extract JSON from markdown code blocks or other wrappers
+			json_match = re.search(r"\{[\s\S]*\"(?:english_variants|marathi_variants)\"[\s\S]*\}", text)
+			if json_match:
+				try:
+					result = json.loads(json_match.group(0))
+				except Exception:
+					pass
+		
+		if result:
+			english_variants = result.get("english_variants", [])
+			marathi_variants = result.get("marathi_variants", [])
+			# Ensure they're lists and limit to reasonable size
+			if isinstance(english_variants, list):
+				english_variants = english_variants[:12]
+			else:
+				english_variants = []
+			if isinstance(marathi_variants, list):
+				marathi_variants = marathi_variants[:12]
+			else:
+				marathi_variants = []
+			return {"english_variants": english_variants, "marathi_variants": marathi_variants}
+		else:
+			logger.warning(f"Could not parse LLM response for name variations: {text[:100]}")
+			return {"english_variants": [], "marathi_variants": []}
+			
+	except Exception as e:
+		logger.exception("LLM name variation generation failed: %s", e)
+		# Fallback to simple phonetic generation on error
+		try:
+			vars = nlp.generate_all_name_variations(input_name)
+			return {
+				"english_variants": list(vars.get("english", []))[:12],
+				"marathi_variants": list(vars.get("marathi", []))[:12],
+			}
+		except Exception:
+			return {"english_variants": [], "marathi_variants": []}
+
+
 @app.get("/phonetics")
 def phonetics(seed_name: str = Query(..., description="Name to generate phonetic/variation suggestions for")) -> dict:
-    if not seed_name:
-        raise HTTPException(status_code=400, detail="seed_name required")
-    vars = nlp.generate_all_name_variations(seed_name)
-    # Also include simple phonetic keys for the bases
-    return {
-        "input": seed_name,
-        "variations": vars,
-    }
+	if not seed_name:
+		raise HTTPException(status_code=400, detail="seed_name required")
+	
+	variations = _generate_name_variations_llm(seed_name)
+	
+	return {
+		"input": seed_name,
+		"variations": {
+			"english": set(variations.get("english_variants", [])),
+			"marathi": set(variations.get("marathi_variants", [])),
+		},
+	}
 
 
 @app.get("/search")
@@ -186,10 +286,10 @@ def _extract_person_name_llm(raw_name: str) -> Optional[str]:
 	if not raw_name:
 		return None
 	try:
-		base_url = os.getenv("LLM_BASE_URL", "http://192.168.1.198:11434/v1")
-		api_key = os.getenv("LLM_API_KEY", "ollama")
-		model = os.getenv("LLM_MODEL", "gpt-oss:20b")
-		client = OpenAI(base_url=base_url, api_key=api_key)
+		client = OpenAI(
+			base_url="http://192.168.1.198:11434/v1",
+			api_key="ollama"
+		)
 		system_prompt = "Return JSON only. You extract concise person names."
 		user_prompt = (
 			"Extract only the main human person's name from the text.\n"
@@ -199,13 +299,12 @@ def _extract_person_name_llm(raw_name: str) -> Optional[str]:
 			f"Text: {raw_name}"
 		)
 		resp = client.chat.completions.create(
-			model=model,
+			model="gpt-oss:20b",
 			messages=[
 				{"role": "system", "content": system_prompt},
 				{"role": "user", "content": user_prompt},
 			],
 			temperature=0,
-			max_tokens=64,
 		)
 		text = (resp.choices[0].message.content or "").strip()
 		if not text:

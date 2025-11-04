@@ -127,66 +127,101 @@ def extract_names_from_blob(blob: Optional[str]) -> List[str]:
 
 
 # ------------------ Name Variation Utilities ------------------
-def _generate_english_spelling_variations(name: str, rules: Dict[str, List[str]]) -> Set[str]:
-	if not name:
-		return {""}
-	char = name[0]
-	rest = name[1:]
-	variations_of_rest = _generate_english_spelling_variations(rest, rules)
-	current: Set[str] = set()
-	subs = rules.get(char, [char])
-	for sub in subs:
-		for v in variations_of_rest:
-			current.add(sub + v)
-	return current
+def _generate_simple_variations(text: str) -> List[str]:
+	"""
+	Generate only practical spelling variations for common mistakes.
+	Focuses on vowel variations (i/ee, u/oo, a/aa) and common transliteration differences.
+	Returns a limited, practical set of variations.
+	"""
+	if not text:
+		return []
+	variations: Set[str] = {text}
+	
+	# Common vowel variations (Punam -> Poonam, etc.)
+	# Only replace ONE occurrence at a time to avoid exponential growth
+	vowel_pairs = [
+		("i", "ee"), ("ee", "i"),
+		("u", "oo"), ("oo", "u"),
+		("a", "aa"), ("aa", "a"),
+	]
+	
+	# Generate variations with single vowel replacements
+	for old_vowel, new_vowel in vowel_pairs:
+		if old_vowel in text:
+			# Replace first occurrence
+			variations.add(text.replace(old_vowel, new_vowel, 1))
+			# Replace last occurrence (might be different)
+			if text.rfind(old_vowel) != text.find(old_vowel):
+				variations.add(text.rsplit(old_vowel, 1)[0] + new_vowel + text.rsplit(old_vowel, 1)[1])
+	
+	# Common consonant variations (limited)
+	consonant_pairs = [
+		("v", "w"), ("w", "v"),
+		("j", "z"), ("z", "j"),
+		("s", "sh"), ("sh", "s"),
+	]
+	
+	for old_cons, new_cons in consonant_pairs:
+		if old_cons in text:
+			variations.add(text.replace(old_cons, new_cons, 1))
+	
+	return sorted(list(variations))[:8]  # Limit to 8 variations max
 
 
 def generate_all_name_variations(input_name: str) -> Dict[str, Set[str]]:
 	"""
-	Generate English/Marathi name variations via transliteration + simple spelling rules.
-	Returns { 'marathi': set[str], 'english': set[str] }.
+	Generate practical English/Marathi name variations for common spelling mistakes.
+	Returns { 'marathi': set[str], 'english': set[str] } with limited, meaningful variations.
 	"""
+	if not input_name:
+		return {"marathi": set(), "english": set()}
+	
 	base_english = ""
 	base_devanagari = ""
+	
 	if is_devanagari(input_name):
 		base_devanagari = input_name
-		base_english = transliterate(input_name, sanscript.DEVANAGARI, sanscript.ITRANS)
+		try:
+			base_english = transliterate(input_name, sanscript.DEVANAGARI, sanscript.ITRANS)
+		except Exception:
+			base_english = input_name.lower()
 	else:
 		base_english = (input_name or "").lower()
 		try:
 			base_devanagari = transliterate(base_english, sanscript.ITRANS, sanscript.DEVANAGARI)
 		except Exception:
-			temp = base_english.replace("i", "ee").replace("oo", "U")
-			base_devanagari = transliterate(temp, sanscript.ITRANS, sanscript.DEVANAGARI)
-
+			base_devanagari = input_name
+	
+	# Generate limited English variations
+	english_vars = _generate_simple_variations(base_english)
+	english_variations: Set[str] = set(english_vars)
+	
+	# Generate limited Marathi variations (only common vowel/consonant swaps)
 	marathi_variations: Set[str] = {base_devanagari}
-	rules_marathi = {
-		"ी": "ि",
-		"ि": "ी",
-		"ू": "ु",
-		"ु": "ू",
-		"श": "स",
-		"स": "श",
-	}
-	for _ in range(2):
-		temp_set: Set[str] = set()
-		for nm in list(marathi_variations):
-			for ch, rep in rules_marathi.items():
-				if ch in nm:
-					temp_set.add(nm.replace(ch, rep, 1))
-		marathi_variations.update(temp_set)
-
-	english_variations: Set[str] = set()
-	for nm in marathi_variations:
-		english_variations.add(transliterate(nm, sanscript.DEVANAGARI, sanscript.ITRANS))
-
-	rules_english = {
-		"a": ["a", "aa"],
-		"i": ["i", "ee"],
-		"u": ["u", "oo"],
-		"v": ["v", "w"],
-		"j": ["j", "z"],
-	}
-	english_variations.update(_generate_english_spelling_variations(base_english, rules_english))
-
+	
+	# Simple Marathi character swaps (only one swap per variation)
+	marathi_swaps = [
+		("ी", "ि"), ("ि", "ी"),
+		("ू", "ु"), ("ु", "ू"),
+		("श", "स"), ("स", "श"),
+	]
+	
+	for old_char, new_char in marathi_swaps:
+		if old_char in base_devanagari:
+			# Only replace first occurrence
+			marathi_variations.add(base_devanagari.replace(old_char, new_char, 1))
+	
+	# Limit Marathi variations
+	marathi_variations = set(list(marathi_variations)[:6])
+	
+	# Add transliterations of Marathi variations to English
+	for marathi_var in list(marathi_variations)[:3]:  # Only top 3
+		try:
+			english_variations.add(transliterate(marathi_var, sanscript.DEVANAGARI, sanscript.ITRANS))
+		except Exception:
+			pass
+	
+	# Limit English variations
+	english_variations = set(list(english_variations)[:8])
+	
 	return {"marathi": marathi_variations, "english": english_variations}

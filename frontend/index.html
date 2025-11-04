@@ -42,10 +42,12 @@
 		.toolbar { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
 		.stat { color: var(--muted); font-size: 12px; padding: 6px 10px; background: #0d141d; border: 1px solid var(--border); border-radius: 10px; }
 
-		.table-wrap { margin-top: 16px; background: #0c1219; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
-		table { width: 100%; border-collapse: collapse; }
-		thead th { position: sticky; top: 0; background: #101824; color: #c8d6e5; font-weight: 600; font-size: 12px; text-align: left; padding: 10px; border-bottom: 1px solid var(--border); }
-		tbody td { padding: 10px; border-bottom: 1px solid #141b25; font-size: 12px; color: #d6e2ef; }
+		.table-wrap { margin-top: 16px; background: #0c1219; border: 1px solid var(--border); border-radius: 12px; overflow-x: auto; }
+		table { width: 100%; border-collapse: collapse; table-layout: auto; }
+		thead th { position: sticky; top: 0; background: #101824; color: #c8d6e5; font-weight: 600; font-size: 12px; text-align: left; padding: 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+		tbody td { padding: 10px; border-bottom: 1px solid #141b25; font-size: 12px; color: #d6e2ef; word-wrap: break-word; word-break: break-word; white-space: normal; vertical-align: top; }
+		tbody td:first-child { min-width: 120px; } /* PAN column */
+		tbody td:nth-child(2), tbody td:nth-child(3) { min-width: 300px; max-width: 600px; } /* Buyer and Seller columns */
 		tbody tr:hover { background: #0f1823; }
 
 		.pagination { display: flex; gap: 8px; align-items: center; justify-content: flex-end; padding: 10px; border-top: 1px solid var(--border); }
@@ -227,24 +229,41 @@
 		table.appendChild(thead);
 		const tbody = document.createElement('tbody');
 		const pageRows = paginate(state.rows, state.page, state.pageSize);
-		for (const r of pageRows){
-			const tr = document.createElement('tr');
-			for (const c of state.colsDisplay){
-				const td = document.createElement('td');
-				const key = state.colMap[c];
-				const v = r[key];
-				// If this column maps to the hit field, render the HTML snippet with <mark>
-				if (r.name_hit_field === key && r.name_hit_snippet_html){
-					td.innerHTML = String(r.name_hit_snippet_html);
-				} else if (r.pan_hit_field === key && r.pan_hit_snippet_html){
-					td.innerHTML = String(r.pan_hit_snippet_html);
-				} else {
-					td.textContent = (v!==null && v!==undefined) ? String(v) : '';
+			for (const r of pageRows){
+				const tr = document.createElement('tr');
+				for (const c of state.colsDisplay){
+					const td = document.createElement('td');
+					const key = state.colMap[c];
+					const v = r[key];
+					// If this column maps to the hit field, render the HTML snippet with <mark>
+					if (r.name_hit_field === key && r.name_hit_snippet_html){
+						td.innerHTML = String(r.name_hit_snippet_html);
+					} else if (r.pan_hit_field === key && r.pan_hit_snippet_html){
+						// For PAN hits, show the FULL field value, not just the snippet
+						// Highlight the PAN within the full text
+						const fullText = String(v || '');
+						if (fullText && r.pan_hit_snippet_html) {
+							// Extract the PAN from the snippet (it's marked with <mark>)
+							const panMatch = r.pan_hit_snippet_html.match(/<mark>([^<]+)<\/mark>/);
+							if (panMatch) {
+								const panToHighlight = panMatch[1];
+								// Replace all occurrences of the PAN in the full text with highlighted version
+								const regex = new RegExp(panToHighlight.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+								const highlighted = fullText.replace(regex, (match) => `<mark>${match}</mark>`);
+								td.innerHTML = highlighted;
+							} else {
+								td.innerHTML = fullText;
+							}
+						} else {
+							td.textContent = fullText;
+						}
+					} else {
+						td.textContent = (v!==null && v!==undefined) ? String(v) : '';
+					}
+					tr.appendChild(td);
 				}
-				tr.appendChild(td);
+				tbody.appendChild(tr);
 			}
-			tbody.appendChild(tr);
-		}
 		table.appendChild(tbody);
 		const pages = Math.max(1, Math.ceil(state.rows.length / state.pageSize));
 		el('pageInfo').textContent = `Page ${state.page} / ${pages}`;

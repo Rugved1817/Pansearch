@@ -63,3 +63,4 @@ python src/search.py --db "data/tx.duckdb" --seed-name "चिरायु स�
 ### Notes
 - Double Metaphone is leveraged for English; Marathi is transliterated to Latin before phonetic hashing. We combine phonetic blocking with fuzzy ratios to handle small spelling/orthographic variations.
 - For production-scale recall, consider adding a vector store on top of character n-gram embeddings of names and addresses.
+
