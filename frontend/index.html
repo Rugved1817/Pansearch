@@ -116,8 +116,8 @@
 	<script>
 	// Use localhost when opened via file://, otherwise keep same host at port 8000
 	const API_BASE = (location.protocol === 'file:') ? 'http://localhost:8000' : `${location.protocol}//${location.hostname || 'localhost'}:8000`;
-		const el = id => document.getElementById(id);
-		let state = { rows: [], colsDisplay: [], colMap: {}, page: 1, pageSize: 100, lastQueryPan: null, lastQuerySeed: null };
+	const el = id => document.getElementById(id);
+	let state = { rows: [], colsDisplay: [], colMap: {}, page: 1, pageSize: 100 };
 
 	function showToast(msg){ const t = el('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'), 2200); }
 	function setStatus(msg){ el('stat').textContent = msg; }
@@ -154,8 +154,6 @@
 			if (!res.ok) throw new Error(await res.text());
 			const json = await res.json();
 			state.rows = json.data || [];
-			state.lastQueryPan = pan || null;
-			state.lastQuerySeed = seed || null;
 			// If PAN provided, fetch Name/Age from external API and inject into rows
 			let metaName = null, metaAge = null;
 			if (pan) {
@@ -232,29 +230,9 @@
 				if (r.name_hit_field === key && r.name_hit_snippet_html){
 					td.innerHTML = String(r.name_hit_snippet_html);
 				} else if (key === 'pan_numbers'){
-					// Always show full PAN in one line, with highlight if searched by PAN
-					const text = (v!==null && v!==undefined) ? String(v) : '';
-					const panQ = (state.lastQueryPan || '').toUpperCase();
-					if (panQ && text.toUpperCase().includes(panQ)){
-						const esc = (s)=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-						const re = new RegExp(panQ.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'), 'gi');
-						td.innerHTML = esc(text).replace(re, m=>`<mark>${m}</mark>`);
-					} else {
-						td.textContent = text;
-					}
+					// Always show full PAN in one line (no snippet)
+					td.textContent = (v!==null && v!==undefined) ? String(v) : '';
 					td.style.whiteSpace = 'nowrap';
-					td.style.wordBreak = 'normal';
-				} else if (state.lastQueryPan && typeof v === 'string' && v){
-					// For PAN searches, highlight PAN anywhere in Buyer/Seller without truncating
-					const panQ = (state.lastQueryPan || '').toUpperCase();
-					const text = String(v);
-					const esc = (s)=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-					const re = new RegExp(panQ.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'), 'gi');
-					if (panQ && text.toUpperCase().includes(panQ)){
-						td.innerHTML = esc(text).replace(re, m=>`<mark>${m}</mark>`);
-					} else {
-						td.textContent = text;
-					}
 				} else {
 					// Show full content for all fields (no truncation), so Buyer/Seller are complete
 					td.textContent = (v!==null && v!==undefined) ? String(v) : '';
