@@ -64,31 +64,39 @@ def _generate_name_variations_llm(input_name: str) -> dict:
 			base_url="http://192.168.1.198:11434/v1",
 			api_key="ollama"
 		)
-		
+
+		# Prompt aligned to user's requested format/example
 		system_prompt = (
-			"You are an expert in Indian name transliteration, phonetic spelling, and linguistic normalization.\n"
-			"Your task is to generate **both English and Marathi (Devanagari)** name variations for the given input.\n\n"
-			"### Instructions:\n"
-			"1. Detect automatically whether the input name is in English or Marathi (Devanagari).\n"
-			"2. Generate realistic **real-world spelling and phonetic variations** (as commonly seen in official documents like PAN, Aadhaar, voter ID, etc.).\n"
-			"3. If the input is in English → return Marathi (Devanagari) transliterations and variations.\n"
-			"   If the input is in Marathi → return English transliterations and variations.\n"
-			"4. Preserve correct pronunciation and avoid random or invalid spellings.\n"
-			"5. Return results in structured **JSON** format.\n\n"
-			"### Output Format:\n"
-			"{\n"
-			'  "original_name": "<input name>",\n'
-			'  "english_variants": [list of realistic English/phonetic variants],\n'
-			'  "marathi_variants": [list of Marathi spelling variants]\n'
-			"}\n\n"
-			"### Notes:\n"
-			"- Handle long vowels (aa vs a, ee vs i, oo vs u)\n"
-			"- Handle \"Shree / Shri / Sri / Sree\" patterns\n"
-			"- Handle Marathi pronunciation for ढ, ठ, ण, ं, etc.\n"
-			"- Avoid gibberish or transliteration errors"
+			"You are an expert in Indian multilingual data normalization.\n"
+			"Return JSON only. No prose."
 		)
-		
-		user_prompt = f"### Input:\n{input_name}\n\n### Output:"
+		user_prompt = (
+			"You are an expert in Indian multilingual data normalization.\n"
+			"Given a person's name written in mixed Marathi and English, generate multiple possible variations of that name in both English and Marathi.\n\n"
+			f"Input: \"{input_name}\"\n"
+			"Example output:\n"
+			"{\n"
+			"  \"input\": \"rajiv manoj patel\",\n"
+			"  \"variations\": {\n"
+			"    \"english\": [\n"
+			"      \"Rajiv Manoj Patel\",\n"
+			"      \"Rajeev Manoj Patel\",\n"
+			"      \"Rajiv M Patel\",\n"
+			"      \"R M Patel\",\n"
+			"      \"Rajiv M. Patel\",\n"
+			"      \"Rajeev M Patel\",\n"
+			"      \"Rajiv Manooj Paatel\"\n"
+			"    ],\n"
+			"    \"marathi\": [\n"
+			"      \"राजीव मनोज पटेल\",\n"
+			"      \"राजीव्ह मनोज पाटेल\",\n"
+			"      \"राजीव एम. पटेल\",\n"
+			"      \"आर. एम. पटेल\",\n"
+			"      \"राजीव मनूज पाटील\"\n"
+			"    ]\n"
+			"  }\n"
+			"}"
+		)
 		
 		resp = client.chat.completions.create(
 			model="gpt-oss:20b",
@@ -110,16 +118,22 @@ def _generate_name_variations_llm(input_name: str) -> dict:
 			result = json.loads(text)
 		except Exception:
 			# Try to extract JSON from markdown code blocks or other wrappers
-			json_match = re.search(r"\{[\s\S]*\"(?:english_variants|marathi_variants)\"[\s\S]*\}", text)
+			json_match = re.search(r"\{[\s\S]*\"(?:variations|english_variants|marathi_variants)\"[\s\S]*\}", text)
 			if json_match:
 				try:
 					result = json.loads(json_match.group(0))
 				except Exception:
 					pass
-		
+
 		if result:
-			english_variants = result.get("english_variants", [])
-			marathi_variants = result.get("marathi_variants", [])
+			# Support both the user's { variations: { english, marathi } } shape
+			# and our previous { english_variants, marathi_variants } shape
+			if "variations" in result and isinstance(result["variations"], dict):
+				english_variants = result["variations"].get("english", [])
+				marathi_variants = result["variations"].get("marathi", [])
+			else:
+				english_variants = result.get("english_variants", [])
+				marathi_variants = result.get("marathi_variants", [])
 			# Ensure they're lists and limit to reasonable size
 			if isinstance(english_variants, list):
 				english_variants = english_variants[:12]

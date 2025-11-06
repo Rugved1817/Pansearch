@@ -4,6 +4,9 @@
 	<meta charset="UTF-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 	<title>Transaction Search</title>
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 	<style>
 		:root {
 			--bg: #0b0f14;
@@ -14,13 +17,15 @@
 			--accent: #8e7cff;
 			--danger: #ff6b6b;
 			--border: #1f2a37;
+			--row-alt: #0d141c;
+			--focus-ring: rgba(142,124,255,0.35);
 		}
 		mark { background: #ffeb3b; color: #111; padding: 0 .15em; border-radius: 2px; }
 		* { box-sizing: border-box; }
 		html, body { height: 100%; }
-		body { margin: 0; background: linear-gradient(180deg, #0b0f14, #0a0d12); color: var(--text); font-family: "Inter", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+		body { margin: 0; background: linear-gradient(180deg, #0b0f14, #0a0d12); color: var(--text); font-family: "Inter", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
 		.container { max-width: 1200px; margin: 0 auto; padding: 24px; }
-		h1 { font-size: 20px; margin: 0 0 16px; letter-spacing: 0.3px; color: #dbe7f3; }
+		h1 { font-size: 24px; margin: 0 0 16px; letter-spacing: 0.2px; color: #dbe7f3; font-weight: 700; }
 		.header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
 		.badge { background: linear-gradient(135deg, #1a2330, #121a24); padding: 6px 10px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: 12px; }
 
@@ -31,20 +36,30 @@
 		.col-6 { grid-column: span 6; }
 		.col-8 { grid-column: span 8; }
 
-		.input { width: 100%; background: #0c121a; border: 1px solid var(--border); color: var(--text); padding: 10px 12px; border-radius: 10px; outline: none; transition: border-color .2s; font-size: 14px; }
-		.input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(142,124,255,0.15); }
+		.input { width: 100%; background: #0c121a; border: 1px solid var(--border); color: var(--text); padding: 12px 12px; border-radius: 10px; outline: none; transition: border-color .2s, box-shadow .2s; font-size: 14px; }
+		.input::placeholder { color: #6f8194; }
+		.input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-ring); }
 		.label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
-		.btn { background: linear-gradient(135deg, #263246, #1b2533); color: #e8f3ff; border: 1px solid var(--border); padding: 10px 14px; border-radius: 10px; cursor: pointer; font-weight: 600; letter-spacing: .2px; }
-		.btn:hover { filter: brightness(1.1); }
+		.btn { background: linear-gradient(135deg, #263246, #1b2533); color: #e8f3ff; border: 1px solid var(--border); padding: 10px 14px; border-radius: 10px; cursor: pointer; font-weight: 600; letter-spacing: .2px; transition: transform .05s ease, filter .15s ease, box-shadow .15s ease; }
+		.btn:hover { filter: brightness(1.08); }
+		.btn:active { transform: translateY(1px); }
+		.btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--focus-ring); }
 		.btn-primary { background: linear-gradient(135deg, #2b3e52, #203044); border-color: #2a3a4e; }
 		.btn-ghost { background: transparent; }
+		.btn[disabled] { opacity: 0.5; cursor: not-allowed; filter: none; }
+		/* Inline loading spinner inside buttons */
+		.btn .spinner { display: none; width: 14px; height: 14px; border: 2px solid #cfe3ff; border-top-color: transparent; border-radius: 50%; margin-left: 8px; animation: spin .8s linear infinite; }
+		.btn.loading .spinner { display: inline-block; }
+		.btn.loading .btn-label { opacity: .85; }
+		@keyframes spin { to { transform: rotate(360deg); } }
 
 		.toolbar { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
 		.stat { color: var(--muted); font-size: 12px; padding: 6px 10px; background: #0d141d; border: 1px solid var(--border); border-radius: 10px; }
 
-		.table-wrap { margin-top: 16px; background: #0c1219; border: 1px solid var(--border); border-radius: 12px; overflow-x: auto; }
+		.table-wrap { margin-top: 16px; background: #0c1219; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; overflow-x: auto; }
 		table { width: 100%; border-collapse: collapse; table-layout: auto; }
-		thead th { position: sticky; top: 0; background: #101824; color: #c8d6e5; font-weight: 600; font-size: 12px; text-align: left; padding: 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+		thead th { position: sticky; top: 0; background: #101824; color: #c8d6e5; font-weight: 600; font-size: 12px; text-align: left; padding: 10px; border-bottom: 1px solid var(--border); white-space: nowrap; backdrop-filter: blur(4px); }
+		tbody tr:nth-child(even) { background: var(--row-alt); }
 		tbody td { padding: 10px; border-bottom: 1px solid #141b25; font-size: 12px; color: #d6e2ef; word-wrap: break-word; word-break: break-word; white-space: normal; vertical-align: top; }
 		tbody td:first-child { min-width: 120px; } /* PAN column */
 		tbody td:nth-child(2), tbody td:nth-child(3) { min-width: 300px; max-width: 600px; } /* Buyer and Seller columns */
@@ -59,6 +74,15 @@
 
 		.skeleton { background: linear-gradient(90deg, #0e1520 25%, #121b29 37%, #0e1520 63%); background-size: 400% 100%; animation: shimmer 1.2s infinite; border-radius: 8px; height: 38px; }
 		@keyframes shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
+
+		@media (max-width: 900px) {
+			.row { grid-template-columns: repeat(12, 1fr); }
+			.col-4, .col-6, .col-2, .col-3, .col-8 { grid-column: span 12; }
+			.header { flex-direction: column; align-items: flex-start; gap: 8px; }
+			.toolbar { flex-direction: column; align-items: stretch; gap: 8px; }
+			.table-wrap { margin-top: 12px; }
+			.pagination { justify-content: center; }
+		}
 	</style>
 </head>
 <body>
@@ -72,25 +96,30 @@
 			<div class="row">
 				<div class="col-4">
 					<label class="label">PAN</label>
-					<input id="pan" class="input" placeholder="e.g., AAACO8053A" />
+					<input id="pan" class="input" placeholder="e.g., AAACO8053A" aria-label="PAN number" inputmode="latin" autocomplete="on" name="pan" />
 				</div>
 				<div class="col-6">
 					<label class="label">Name (Marathi or English)</label>
-					<input id="seed" class="input" placeholder="e.g., मिताली श्रीनिवास पेंढारकर" />
+					<input id="seed" class="input" placeholder="e.g., मिताली श्रीनिवास पेंढारकर" aria-label="Person name" autocomplete="on" name="person-name" />
 				</div>
 				<div class="col-2" style="display:flex; align-items:flex-end; justify-content:flex-end; gap:8px;">
-					<button id="btnSearch" class="btn btn-primary">Search</button>
-					<button id="btnClear" class="btn btn-ghost">Clear</button>
+					<button id="btnSearch" class="btn btn-primary" title="Run search (PAN or Name)">Search</button>
+					<button id="btnClear" class="btn btn-ghost" title="Clear inputs">Clear</button>
 				</div>
 			</div>
 			<div class="toolbar" style="margin-top:8px;">
-				<button id="btnPhonetics" class="btn">Suggest phonetics</button>
+			<button id="btnPhonetics" class="btn" title="Suggest phonetic name variations"><span class="btn-label">Suggest phonetics</span><span class="spinner" aria-hidden="true"></span></button>
 				<div id="chips" style="display:flex; gap:6px; flex-wrap:wrap;"></div>
 			</div>
 			<div class="toolbar">
 				<span id="stat" class="stat">Ready</span>
 				<span id="extracted" class="stat" style="display:none;"></span>
 				<div style="margin-left:auto; display:flex; gap:8px; align-items:center;">
+					<label class="label" style="margin:0;">Fuzzy threshold</label>
+					<input id="threshold" type="range" min="0" max="100" value="75" step="1" style="width:140px;" aria-label="Fuzzy match threshold" />
+					<span id="thresholdValue" class="stat">75</span>
+				</div>
+				<div style="display:flex; gap:8px; align-items:center;">
 					<label class="label" style="margin:0;">Page size</label>
 					<select id="pageSize" class="select">
 						<option>20</option>
@@ -98,7 +127,7 @@
 						<option selected>100</option>
 						<option>200</option>
 					</select>
-					<button id="btnExport" class="btn">Export CSV</button>
+					<button id="btnExport" class="btn" title="Export current results as CSV">Export CSV</button>
 				</div>
 			</div>
 		</div>
@@ -120,7 +149,7 @@
 	// Use localhost when opened via file://, otherwise keep same host at port 8000
 	const API_BASE = (location.protocol === 'file:') ? 'http://localhost:8000' : `${location.protocol}//${location.hostname || 'localhost'}:8000`;
 	const el = id => document.getElementById(id);
-			let state = { rows: [], colsDisplay: [], colMap: {}, page: 1, pageSize: 100 };
+			let state = { allRows: [], rows: [], colsDisplay: [], colMap: {}, page: 1, pageSize: 100, threshold: 0.75 };
 
 	function showToast(msg){ const t = el('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'), 2200); }
 	function setStatus(msg){ el('stat').textContent = msg; }
@@ -129,6 +158,8 @@
 	async function fetchPhonetics(){
 		const seed = el('seed').value.trim();
 		if (!seed){ showToast('Enter a name'); return; }
+		const btn = el('btnPhonetics');
+		btn.disabled = true; btn.classList.add('loading');
 		try {
 			const res = await fetch(`${API_BASE}/phonetics?` + new URLSearchParams({seed_name: seed}));
 			if (!res.ok) throw new Error(await res.text());
@@ -141,6 +172,7 @@
 			for (const v of dev) chips.appendChild(makeChip(v));
 			showToast('Phonetic suggestions updated');
 		} catch(e){ console.error(e); showToast('Phonetics failed'); }
+		finally { btn.disabled = false; btn.classList.remove('loading'); }
 	}
 
 	async function fetchSearch(){
@@ -156,7 +188,7 @@
 			const res = await fetch(`${API_BASE}/search?${qs.toString()}`);
 			if (!res.ok) throw new Error(await res.text());
 			const json = await res.json();
-			state.rows = json.data || [];
+			state.allRows = json.data || [];
 			// If PAN provided, fetch Name/Age from external API and inject into rows
 			let metaName = null, metaAge = null;
 			if (pan) {
@@ -175,7 +207,7 @@
 							metaAge = Number.isFinite(n) ? n : (parsed != null ? String(parsed) : null);
 						}
 						if (metaName != null || metaAge != null) {
-							for (const r of state.rows) { r["Name"] = metaName ?? ''; r["Age"] = metaAge ?? ''; }
+							for (const r of state.allRows) { r["Name"] = metaName ?? ''; r["Age"] = metaAge ?? ''; }
 						}
 						// Show extracted name badge
 						if (metaName) {
@@ -202,8 +234,9 @@
 			state.colsDisplay = desired.map(d => d.header);
 			state.colMap = Object.fromEntries(desired.map(d => [d.header, d.key]));
 			state.page = 1;
+			applyThreshold();
 			render();
-			setStatus(`Found ${state.rows.length.toLocaleString()} rows`);
+			setStatus(`Found ${state.rows.length.toLocaleString()} rows (threshold ${Math.round(state.threshold*100)})`);
 			showToast('Done');
 		} catch(e){
 			console.error(e);
@@ -267,7 +300,21 @@
 		table.appendChild(tbody);
 		const pages = Math.max(1, Math.ceil(state.rows.length / state.pageSize));
 		el('pageInfo').textContent = `Page ${state.page} / ${pages}`;
+		const prevBtn = el('prev');
+		const nextBtn = el('next');
+		prevBtn.disabled = state.page <= 1;
+		nextBtn.disabled = state.page >= pages;
 		el('pager').style.display = 'flex';
+	}
+
+	function applyThreshold(){
+		const thr = state.threshold;
+		if (!Array.isArray(state.allRows)) { state.rows = []; return; }
+		state.rows = state.allRows.filter(r => {
+			const s = typeof r.match_score === 'number' ? r.match_score : 0;
+			return s >= thr;
+		});
+		state.page = 1;
 	}
 
 	function exportCSV(){
@@ -291,6 +338,15 @@
 	el('prev').onclick = ()=>{ if (state.page>1){ state.page--; render(); }};
 	el('next').onclick = ()=>{ const pages = Math.max(1, Math.ceil(state.rows.length / state.pageSize)); if (state.page<pages){ state.page++; render(); }};
 	el('pageSize').onchange = (e)=>{ state.pageSize = parseInt(e.target.value, 10) || 100; state.page = 1; render(); };
+	const thresholdEl = el('threshold');
+	const thresholdValue = el('thresholdValue');
+	thresholdEl.oninput = (e)=>{
+		const v = parseInt(e.target.value, 10);
+		thresholdValue.textContent = String(v);
+		state.threshold = isFinite(v) ? (v/100) : 0.75;
+		applyThreshold();
+		render();
+	};
 	</script>
 </body>
 </html>
