@@ -132,16 +132,16 @@ def _generate_name_variations_llm(input_name: str) -> dict:
 	Use LLM to generate realistic name variations in both English and Marathi.
 	Returns dict with 'english_variants' and 'marathi_variants' lists.
 	"""
-    if not input_name:
-        return {"english_variants": [], "marathi_variants": []}
-    # cache lookup by normalized key
-    try:
-        norm_key = nlp.normalize_name(input_name)
-    except Exception:
-        norm_key = (input_name or "").strip().lower()
-    cached = _cache_get_variants(norm_key)
-    if cached:
-        return cached
+	if not input_name:
+		return {"english_variants": [], "marathi_variants": []}
+	# cache lookup by normalized key
+	try:
+		norm_key = nlp.normalize_name(input_name)
+	except Exception:
+		norm_key = (input_name or "").strip().lower()
+	cached = _cache_get_variants(norm_key)
+	if cached:
+		return cached
 	
 	try:
 		client = OpenAI(
@@ -237,12 +237,12 @@ def _generate_name_variations_llm(input_name: str) -> dict:
 				marathi_variants = marathi_variants[:12]
 			else:
 				marathi_variants = []
-            # write cache
-            try:
-                _cache_put_variants(norm_key, english_variants, marathi_variants)
-            except Exception:
-                pass
-            return {"english_variants": english_variants, "marathi_variants": marathi_variants}
+			# write cache
+			try:
+				_cache_put_variants(norm_key, english_variants, marathi_variants)
+			except Exception:
+				pass
+			return {"english_variants": english_variants, "marathi_variants": marathi_variants}
 		else:
 			logger.warning(f"Could not parse LLM response for name variations: {text[:100]}")
 			return {"english_variants": [], "marathi_variants": []}
@@ -250,17 +250,17 @@ def _generate_name_variations_llm(input_name: str) -> dict:
 	except Exception as e:
 		logger.exception("LLM name variation generation failed: %s", e)
 		# Fallback to simple phonetic generation on error
-        try:
-            vars = nlp.generate_all_name_variations(input_name)
-            eng = list(vars.get("english", []))[:12]
-            mar = list(vars.get("marathi", []))[:12]
-            try:
-                _cache_put_variants(norm_key, eng, mar)
-            except Exception:
-                pass
-            return {"english_variants": eng, "marathi_variants": mar}
-        except Exception:
-            return {"english_variants": [], "marathi_variants": []}
+		try:
+			vars = nlp.generate_all_name_variations(input_name)
+			eng = list(vars.get("english", []))[:12]
+			mar = list(vars.get("marathi", []))[:12]
+			try:
+				_cache_put_variants(norm_key, eng, mar)
+			except Exception:
+				pass
+			return {"english_variants": eng, "marathi_variants": mar}
+		except Exception:
+			return {"english_variants": [], "marathi_variants": []}
 
 
 @app.get("/phonetics")

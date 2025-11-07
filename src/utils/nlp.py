@@ -172,7 +172,7 @@ def generate_all_name_variations(input_name: str) -> Dict[str, Set[str]]:
 	"""
 	Generate practical English/Marathi name variations for common spelling mistakes.
 	Returns { 'marathi': set[str], 'english': set[str] } with limited, meaningful variations.
-	"""
+	""" 	
 	if not input_name:
 		return {"marathi": set(), "english": set()}
 	
