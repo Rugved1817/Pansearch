@@ -231,14 +231,12 @@ def search_by_seed_name(con: duckdb.DuckDBPyConnection, seed_name: str) -> List[
 	
 	candidates = candidate_block_by_names(con, base_names)
 	if not candidates:
-		# Fallback to LIKE-based blocking if phonetic keys don't hit - use OR to get more candidates
+		# Fallback to LIKE-based blocking over normalized buyer/seller blobs and name_norm
 		seed_norm_local = nlp.normalize_name(seed_name)
 		if seed_norm_local:
 			tokens = [t for t in set(seed_norm_local.split(" ")) if len(t) >= 2]
 			if tokens:
 				cols = _get_table_columns(con)
-				clauses = ["name_norm LIKE ?" for _ in tokens]
-				params = [f"%{t}%" for t in tokens]
 				select_parts: List[str] = [
 					"name_norm",
 					("name_phonetic" if "name_phonetic" in cols else "'' AS name_phonetic"),
@@ -246,11 +244,25 @@ def search_by_seed_name(con: duckdb.DuckDBPyConnection, seed_name: str) -> List[
 					("mobile" if "mobile" in cols else "'' AS mobile"),
 					("pan_upper" if "pan_upper" in cols else "'' AS pan_upper"),
 				]
-				# Use OR initially to get more candidates, we'll filter later
+				# Build normalized SQL expressions for buyer/seller blobs (lowercase + punctuation stripped)
+				buyer_expr = "lower(regexp_replace(coalesce(buyer, ''), '[^\\w\\s\\u0900-\\u097F]', ' ', 'g'))"
+				seller_expr = "lower(regexp_replace(coalesce(seller, ''), '[^\\w\\s\\u0900-\\u097F]', ' ', 'g'))"
+				name_expr = "name_norm"  # already normalized in ingest
+				# AND across tokens per column, then OR across columns
+				buyer_and = " AND ".join([f"{buyer_expr} LIKE ?" for _ in tokens])
+				seller_and = " AND ".join([f"{seller_expr} LIKE ?" for _ in tokens])
+				name_and = " AND ".join([f"{name_expr} LIKE ?" for _ in tokens])
+				where = f"(({buyer_and}) OR ({seller_and}) OR ({name_and}))"
+				params = []
+				pattern_params = [f"%{t}%" for t in tokens]
+				# order must match clauses: buyer tokens, seller tokens, name tokens
+				params.extend(pattern_params)
+				params.extend(pattern_params)
+				params.extend(pattern_params)
 				q = f"""
 					SELECT {', '.join(select_parts)}
 					FROM transactions
-					WHERE {' OR '.join(clauses)}
+					WHERE {where}
 					LIMIT {SP.candidate_limit}
 				"""
 				candidates = con.execute(q, params).fetchall()

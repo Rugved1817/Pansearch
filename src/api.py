@@ -3,6 +3,8 @@ import logging
 from typing import List, Optional
 import re
 import json
+import time
+import sqlite3
 import urllib.parse
 import urllib.request
 from openai import OpenAI
@@ -51,13 +53,95 @@ def health() -> dict:
 	return {"status": "ok"}
 
 
+# -------------------- Phonetics Cache (24h, memory + disk) --------------------
+_PHON_CACHE_TTL_SEC = 24 * 3600
+_PHON_CACHE_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "phonetics_cache.sqlite")
+_phon_cache_mem: dict[str, tuple[int, list[str], list[str]]] = {}
+
+def _ensure_cache_db() -> None:
+    os.makedirs(os.path.join(os.path.dirname(os.path.dirname(__file__)), "data"), exist_ok=True)
+    con = sqlite3.connect(_PHON_CACHE_PATH)
+    try:
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS variants (
+                k TEXT PRIMARY KEY,
+                ts INTEGER NOT NULL,
+                english TEXT NOT NULL,
+                marathi TEXT NOT NULL
+            )
+            """
+        )
+        con.commit()
+    finally:
+        con.close()
+
+def _cache_get_variants(key: str) -> Optional[dict]:
+    if not key:
+        return None
+    now = int(time.time())
+    # memory
+    tup = _phon_cache_mem.get(key)
+    if tup and now - tup[0] <= _PHON_CACHE_TTL_SEC:
+        return {"english_variants": tup[1], "marathi_variants": tup[2]}
+    # disk
+    try:
+        _ensure_cache_db()
+        con = sqlite3.connect(_PHON_CACHE_PATH)
+        try:
+            row = con.execute("SELECT ts, english, marathi FROM variants WHERE k = ?", [key]).fetchone()
+            if not row:
+                return None
+            ts_val, eng_json, mar_json = row
+            if now - int(ts_val) > _PHON_CACHE_TTL_SEC:
+                return None
+            eng = json.loads(eng_json)
+            mar = json.loads(mar_json)
+            # populate memory
+            _phon_cache_mem[key] = (int(ts_val), eng, mar)
+            return {"english_variants": eng, "marathi_variants": mar}
+        finally:
+            con.close()
+    except Exception:
+        return None
+
+def _cache_put_variants(key: str, english: list[str], marathi: list[str]) -> None:
+    if not key:
+        return
+    now = int(time.time())
+    # memory
+    _phon_cache_mem[key] = (now, english, marathi)
+    # disk
+    try:
+        _ensure_cache_db()
+        con = sqlite3.connect(_PHON_CACHE_PATH)
+        try:
+            con.execute(
+                "INSERT INTO variants(k, ts, english, marathi) VALUES(?, ?, ?, ?)\n"
+                "ON CONFLICT(k) DO UPDATE SET ts=excluded.ts, english=excluded.english, marathi=excluded.marathi",
+                [key, now, json.dumps(english, ensure_ascii=False), json.dumps(marathi, ensure_ascii=False)],
+            )
+            con.commit()
+        finally:
+            con.close()
+    except Exception:
+        pass
+
 def _generate_name_variations_llm(input_name: str) -> dict:
 	"""
 	Use LLM to generate realistic name variations in both English and Marathi.
 	Returns dict with 'english_variants' and 'marathi_variants' lists.
 	"""
-	if not input_name:
-		return {"english_variants": [], "marathi_variants": []}
+    if not input_name:
+        return {"english_variants": [], "marathi_variants": []}
+    # cache lookup by normalized key
+    try:
+        norm_key = nlp.normalize_name(input_name)
+    except Exception:
+        norm_key = (input_name or "").strip().lower()
+    cached = _cache_get_variants(norm_key)
+    if cached:
+        return cached
 	
 	try:
 		client = OpenAI(
@@ -65,36 +149,41 @@ def _generate_name_variations_llm(input_name: str) -> dict:
 			api_key="ollama"
 		)
 
-		# Prompt aligned to user's requested format/example
+		# Prompt updated per user's specification
 		system_prompt = (
-			"You are an expert in Indian multilingual data normalization.\n"
-			"Return JSON only. No prose."
+			"You are a multilingual transliteration and name variant generator.\n"
+			"Return valid JSON only. No prose."
 		)
 		user_prompt = (
-			"You are an expert in Indian multilingual data normalization.\n"
-			"Given a person's name written in mixed Marathi and English, generate multiple possible variations of that name in both English and Marathi.\n\n"
-			f"Input: \"{input_name}\"\n"
-			"Example output:\n"
+			"You are a multilingual transliteration and name variant generator.\n"
+			"You generate all reasonable Marathi and English name variations of a given name.\n\n"
+			"Rules:\n"
+			"1. Do NOT add or remove letters that change pronunciation unnaturally.\n"
+			"2. Preserve original structure; only minor phonetic spelling variations.\n"
+			"3. Avoid adding 'a', 'ha', 'na', or 'nna' endings that change pronunciation.\n"
+			"4. Include Marathi vowel/consonant variants naturally used by Marathi speakers.\n"
+			"   - all combinations of \n"
+			"        'ी': 'ि', 'ि': 'ी', # Velanti\n"
+			"        'ू': 'ु', 'ु': 'ू', # Ukar\n"
+			"5. Include English transliteration variants with minor phonetic differences.\n"
+			"6. Generate short-form and initial-based variations like:\n"
+			"   - Initials (L.S.Jain, L. S. Jain)\n"
+			"   - Mixed (Lakshmi.S.Jain, L.Suresh.Jain)\n"
+			"   - Dotted and spaced forms for Marathi too (ल.स.जैन, लक्ष्मी.स.जैन)\n"
+			"7. Ensure both English and Marathi variants have:\n"
+			"   - Normal full names\n"
+			"   - Abbreviated names (with initials)\n"
+			"   - Punctuated forms (with or without spaces)\n"
+			"8. Return valid JSON only, with two keys: \"marathi_variations\" and \"english_variations\".\n\n"
+			f"Name: {input_name}\n\n"
+			"Example format:\n"
 			"{\n"
-			"  \"input\": \"rajiv manoj patel\",\n"
-			"  \"variations\": {\n"
-			"    \"english\": [\n"
-			"      \"Rajiv Manoj Patel\",\n"
-			"      \"Rajeev Manoj Patel\",\n"
-			"      \"Rajiv M Patel\",\n"
-			"      \"R M Patel\",\n"
-			"      \"Rajiv M. Patel\",\n"
-			"      \"Rajeev M Patel\",\n"
-			"      \"Rajiv Manooj Paatel\"\n"
-			"    ],\n"
-			"    \"marathi\": [\n"
-			"      \"राजीव मनोज पटेल\",\n"
-			"      \"राजीव्ह मनोज पाटेल\",\n"
-			"      \"राजीव एम. पटेल\",\n"
-			"      \"आर. एम. पटेल\",\n"
-			"      \"राजीव मनूज पाटील\"\n"
-			"    ]\n"
-			"  }\n"
+			"  \"marathi_variations\": [\n"
+			"    \"लक्ष्मी सुरेश जैन\", \"लक्स्मी सुरेश जैन\", \"ल.स.जैन\", \"लक्ष्मी.स.जैन\"\n"
+			"  ],\n"
+			"  \"english_variations\": [\n"
+			"    \"Lakshmi Suresh Jain\", \"Laxmi Suresh Jain\", \"L.S.Jain\", \"L. S. Jain\", \"Lakshmi.S.Jain\"\n"
+			"  ]\n"
 			"}"
 		)
 		
@@ -118,7 +207,7 @@ def _generate_name_variations_llm(input_name: str) -> dict:
 			result = json.loads(text)
 		except Exception:
 			# Try to extract JSON from markdown code blocks or other wrappers
-			json_match = re.search(r"\{[\s\S]*\"(?:variations|english_variants|marathi_variants)\"[\s\S]*\}", text)
+			json_match = re.search(r"\{[\s\S]*\"(?:marathi_variations|english_variations|variations|english_variants|marathi_variants)\"[\s\S]*\}", text)
 			if json_match:
 				try:
 					result = json.loads(json_match.group(0))
@@ -126,9 +215,14 @@ def _generate_name_variations_llm(input_name: str) -> dict:
 					pass
 
 		if result:
-			# Support both the user's { variations: { english, marathi } } shape
-			# and our previous { english_variants, marathi_variants } shape
-			if "variations" in result and isinstance(result["variations"], dict):
+			# Support multiple shapes:
+			# 1) New: { marathi_variations: [], english_variations: [] }
+			# 2) Old nested: { variations: { english: [], marathi: [] } }
+			# 3) Legacy: { english_variants: [], marathi_variants: [] }
+			if "marathi_variations" in result or "english_variations" in result:
+				english_variants = result.get("english_variations", [])
+				marathi_variants = result.get("marathi_variations", [])
+			elif "variations" in result and isinstance(result["variations"], dict):
 				english_variants = result["variations"].get("english", [])
 				marathi_variants = result["variations"].get("marathi", [])
 			else:
@@ -143,7 +237,12 @@ def _generate_name_variations_llm(input_name: str) -> dict:
 				marathi_variants = marathi_variants[:12]
 			else:
 				marathi_variants = []
-			return {"english_variants": english_variants, "marathi_variants": marathi_variants}
+            # write cache
+            try:
+                _cache_put_variants(norm_key, english_variants, marathi_variants)
+            except Exception:
+                pass
+            return {"english_variants": english_variants, "marathi_variants": marathi_variants}
 		else:
 			logger.warning(f"Could not parse LLM response for name variations: {text[:100]}")
 			return {"english_variants": [], "marathi_variants": []}
@@ -151,14 +250,17 @@ def _generate_name_variations_llm(input_name: str) -> dict:
 	except Exception as e:
 		logger.exception("LLM name variation generation failed: %s", e)
 		# Fallback to simple phonetic generation on error
-		try:
-			vars = nlp.generate_all_name_variations(input_name)
-			return {
-				"english_variants": list(vars.get("english", []))[:12],
-				"marathi_variants": list(vars.get("marathi", []))[:12],
-			}
-		except Exception:
-			return {"english_variants": [], "marathi_variants": []}
+        try:
+            vars = nlp.generate_all_name_variations(input_name)
+            eng = list(vars.get("english", []))[:12]
+            mar = list(vars.get("marathi", []))[:12]
+            try:
+                _cache_put_variants(norm_key, eng, mar)
+            except Exception:
+                pass
+            return {"english_variants": eng, "marathi_variants": mar}
+        except Exception:
+            return {"english_variants": [], "marathi_variants": []}
 
 
 @app.get("/phonetics")
@@ -381,10 +483,10 @@ def pan_meta(pan: str = Query(..., description="PAN to fetch metadata for")) -> 
 				age = age_num
 			except Exception:
 				pass
-		# LLM extraction for a concise human name
-		extracted = _extract_person_name_llm(name or "") if name else None
-		final_name = extracted or name
-		extraction_error = None if (extracted is not None) else ("llm_extraction_failed" if name else None)
+		# Return raw name without LLM extraction
+		extracted = None
+		final_name = name
+		extraction_error = None
 		return {"pan": pan_id, "name": final_name, "extracted_name": extracted, "raw_name": name, "age": age, "raw": data, "extraction_error": extraction_error}
 	except Exception as e:
 		logger.exception("PAN meta upstream error for %s: %s", pan_id, e)
