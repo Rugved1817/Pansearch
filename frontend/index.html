@@ -150,6 +150,7 @@
 						<option>200</option>
 					</select>
 					<button id="btnExport" class="btn" title="Export current results as CSV">Export CSV</button>
+					<button id="btnExportPDF" class="btn" title="Export current results as PDF">Export PDF</button>
 				</div>
 			</div>
 		</div>
@@ -166,6 +167,12 @@
 	</div>
 
 	<div class="toast" id="toast"></div>
+
+	<!-- PDF Generation Libraries -->
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+	<!-- html2canvas for Unicode text rendering -->
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 
 	<script>
 	// Use localhost when opened via file://, otherwise keep same host at port 8000
@@ -223,13 +230,41 @@
 						metaAge = ej.age ?? null;
 						// Normalize to primitives
 						if (typeof metaName !== 'string') metaName = metaName != null ? String(metaName) : null;
-						if (typeof metaAge !== 'number') {
+						let metaAgeNum = null;
+						if (typeof metaAge === 'number' && Number.isFinite(metaAge)) {
+							metaAgeNum = metaAge;
+						} else if (metaAge != null) {
 							const parsed = ej && (ej.age ?? ej.Age);
 							const n = Number(parsed);
-							metaAge = Number.isFinite(n) ? n : (parsed != null ? String(parsed) : null);
+							metaAgeNum = Number.isFinite(n) ? n : null;
 						}
-						if (metaName != null || metaAge != null) {
-							for (const r of state.allRows) { r["Name"] = metaName ?? ''; r["Age"] = metaAge ?? ''; }
+						
+						// Calculate current age based on year from first transaction
+						// Formula: current_age = age_at_transaction + (current_year - transaction_year)
+						let currentAge = metaAgeNum;
+						if (metaAgeNum != null && state.allRows.length > 0) {
+							const firstTransaction = state.allRows[0];
+							// Try to get year field (case-insensitive check for robustness)
+							const transactionYear = firstTransaction.year || firstTransaction.Year || firstTransaction.YEAR;
+							if (transactionYear != null && transactionYear !== '') {
+								const yearNum = typeof transactionYear === 'number' ? transactionYear : parseInt(String(transactionYear), 10);
+								if (Number.isFinite(yearNum) && yearNum > 1900 && yearNum <= new Date().getFullYear() + 1) {
+									const currentYear = new Date().getFullYear();
+									currentAge = metaAgeNum + (currentYear - yearNum);
+									console.log(`Age calculation: ${metaAgeNum} (age) + (${currentYear} - ${yearNum}) = ${currentAge}`);
+								} else {
+									console.warn('Invalid transaction year:', transactionYear);
+								}
+							} else {
+								console.warn('Year field not found in first transaction');
+							}
+						}
+						
+						if (metaName != null || metaAgeNum != null) {
+							for (const r of state.allRows) { 
+								r["Name"] = metaName ?? ''; 
+								r["Age"] = (metaAgeNum != null) ? currentAge : ''; 
+							}
 						}
 							// Show name badge; label as Extracted only if extracted_name present
 							const ex = el('extracted');
@@ -357,10 +392,416 @@
 	}
 	function safeCsv(v){ if (v===null||v===undefined) return ''; const s = String(v).replace(/"/g,'""'); return /[",\n]/.test(s) ? `"${s}"` : s; }
 
+	// Helper function to ensure Unicode text is properly handled
+	function prepareTextForPDF(text) {
+		if (!text) return '';
+		// Ensure text is a string
+		let str = String(text);
+		// Strip HTML
+		str = str.replace(/<[^>]*>/g, '');
+		// jsPDF handles UTF-8, but Devanagari needs special font
+		// For now, return as-is - the font issue needs to be addressed separately
+		return str;
+	}
+
+	function exportPDF(){
+		if (!state.rows.length){ showToast('No data'); return; }
+		if (typeof window.jspdf === 'undefined') {
+			showToast('PDF library not loaded');
+			return;
+		}
+		
+		const { jsPDF } = window.jspdf;
+		const doc = new jsPDF('p', 'mm', 'a4'); // Portrait orientation to match sample
+		
+		// Note: jsPDF has limited Unicode support by default
+		// Devanagari (Marathi) text may not render correctly without a custom font
+		// The text will be included but may appear as garbled characters
+		// To fix this properly, we would need to add a Unicode font like Noto Sans Devanagari
+		const pageWidth = doc.internal.pageSize.getWidth();
+		const pageHeight = doc.internal.pageSize.getHeight();
+		const margin = 15;
+		const contentWidth = pageWidth - (2 * margin);
+		
+		// Helper function to add REAL VALUE header (first page only)
+		function addRealValueHeader(doc) {
+			// REAL VALUE logo and text in top right
+			doc.setFontSize(14);
+			doc.setFont(undefined, 'bold');
+			doc.setTextColor(33, 150, 243); // Blue color
+			doc.text('REAL VALUE', pageWidth - margin, margin + 5, { align: 'right' });
+			
+			doc.setFontSize(8);
+			doc.setFont(undefined, 'normal');
+			doc.setTextColor(100, 150, 200); // Lighter blue
+			doc.text('REAL INSIGHTS DELIVERED', pageWidth - margin, margin + 10, { align: 'right' });
+		}
+		
+		// Helper function to add header for other pages
+		function addHeader(doc, pageNum) {
+			doc.setFontSize(16);
+			doc.setFont(undefined, 'bold');
+			doc.setTextColor(40, 40, 40);
+			doc.text('Transaction Search Report', margin, margin + 8);
+			
+			doc.setFontSize(10);
+			doc.setFont(undefined, 'normal');
+			doc.setTextColor(100, 100, 100);
+			const dateStr = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+			doc.text(`Generated on: ${dateStr}`, pageWidth - margin, margin + 8, { align: 'right' });
+			
+			// Header line
+			doc.setDrawColor(200, 200, 200);
+			doc.setLineWidth(0.5);
+			doc.line(margin, margin + 12, pageWidth - margin, margin + 12);
+		}
+		
+		// Helper function to add footer (first page style)
+		function addRealValueFooter(doc) {
+			const footerY = pageHeight - 25;
+			
+			// Colored gradient line (blue, orange, red)
+			doc.setDrawColor(33, 150, 243); // Blue
+			doc.setLineWidth(2);
+			doc.line(margin, footerY, pageWidth - margin, footerY);
+			
+			// Address on left
+			doc.setFontSize(8);
+			doc.setFont(undefined, 'normal');
+			doc.setTextColor(60, 60, 60);
+			doc.text('B1-001, U/B Floor, Boomerang Chandivali Farm Road, Powai, Andheri East, Mumbai, Maharashtra 400072', 
+				margin, footerY + 5);
+			
+			// Contact info on right
+			doc.setTextColor(33, 150, 243); // Blue for links
+			doc.text('www.real-value.co.in', pageWidth - margin, footerY + 5, { align: 'right' });
+			doc.text('info@real-value.co.in', pageWidth - margin, footerY + 9, { align: 'right' });
+			doc.text('+91 88284 05969', pageWidth - margin, footerY + 13, { align: 'right' });
+		}
+		
+		// Helper function to add footer for other pages
+		function addFooter(doc, pageNum, totalPages) {
+			const footerY = pageHeight - margin;
+			doc.setFontSize(9);
+			doc.setFont(undefined, 'normal');
+			doc.setTextColor(120, 120, 120);
+			
+			// Footer line
+			doc.setDrawColor(200, 200, 200);
+			doc.setLineWidth(0.5);
+			doc.line(margin, footerY - 8, pageWidth - margin, footerY - 8);
+			
+			// Page number
+			doc.text(`Page ${pageNum} of ${totalPages}`, pageWidth / 2, footerY, { align: 'center' });
+			
+			// Confidential watermark text in footer
+			doc.setFontSize(8);
+			doc.setTextColor(180, 180, 180);
+			doc.text('CONFIDENTIAL', pageWidth - margin, footerY, { align: 'right' });
+		}
+		
+		// Helper function to add watermark
+		function addWatermark(doc) {
+			// Use very light gray color for watermark effect
+			doc.setFontSize(72);
+			doc.setFont(undefined, 'bold');
+			doc.setTextColor(230, 230, 230); // Very light gray for subtle watermark
+			doc.text('CONFIDENTIAL', pageWidth / 2, pageHeight / 2, { 
+				align: 'center',
+				angle: 45
+			});
+		}
+		
+		// Get all unique columns from all rows
+		function getAllColumns(rows) {
+			const allCols = new Set();
+			rows.forEach(row => {
+				Object.keys(row).forEach(key => {
+					// Exclude internal fields
+					if (!['pan_upper', 'pan_raw', 'match_score', 'name_hit_field', 'name_hit_snippet', 'name_hit_snippet_html', 'pan_hit_field', 'pan_hit_snippet_html'].includes(key)) {
+						allCols.add(key);
+					}
+				});
+			});
+			return Array.from(allCols).sort();
+		}
+		
+		let pageNum = 1;
+		const allColumns = getAllColumns(state.rows);
+		
+		// PAGE 1: Summary table matching sample PDF structure
+		addRealValueHeader(doc);
+		addWatermark(doc);
+		
+		// Main title - centered
+		doc.setFontSize(14);
+		doc.setFont(undefined, 'bold');
+		doc.setTextColor(40, 40, 40);
+		doc.text('Property Summary Report for Financial Creditor', pageWidth / 2, margin + 30, { align: 'center' });
+		
+		// Get entity name from first transaction if available, or use PAN
+		const firstRow = state.rows[0];
+		const entityName = firstRow?.name_extracted || firstRow?.Name || firstRow?.pan_numbers || 'N/A';
+		doc.setFontSize(12);
+		doc.setFont(undefined, 'bold');
+		doc.setTextColor(60, 60, 60);
+		doc.text(entityName.toUpperCase(), pageWidth / 2, margin + 38, { align: 'center' });
+		
+		// "To:" section (optional - can be customized)
+		const toY = margin + 50;
+		doc.setFontSize(9);
+		doc.setFont(undefined, 'normal');
+		doc.setTextColor(80, 80, 80);
+		doc.text('To,', margin, toY);
+		doc.text('The DGM,', margin + 5, toY + 5);
+		doc.text('legal & recovery department,', margin + 5, toY + 10);
+		doc.text('Abhyudaya co op bank ltd.,', margin + 5, toY + 15);
+		doc.text('parel', margin + 5, toY + 20);
+		doc.text('MOB NO. 8591948712/8169452713', margin + 5, toY + 25);
+		
+		// Table title
+		const tableTitleY = toY + 35;
+		doc.setFontSize(10);
+		doc.setFont(undefined, 'bold');
+		doc.setTextColor(40, 40, 40);
+		doc.text('1) Details : Transaction Summary', margin, tableTitleY);
+		
+		// Prepare summary table data with serial numbers
+		const summaryHeaders = ['Sr', ...state.colsDisplay];
+		const summaryData = state.rows.map((row, idx) => {
+			const rowData = [idx + 1]; // Serial number
+			state.colsDisplay.forEach(header => {
+				const key = state.colMap[header];
+				const val = row[key];
+				// Prepare text for PDF - handle Unicode properly
+				const displayVal = prepareTextForPDF(val);
+				rowData.push(displayVal);
+			});
+			return rowData;
+		});
+		
+		// Create HTML table for proper Unicode rendering
+		// jsPDF doesn't support Devanagari, so we'll render as image using html2canvas
+		const tempDiv = document.createElement('div');
+		tempDiv.style.position = 'absolute';
+		tempDiv.style.left = '-9999px';
+		tempDiv.style.width = (pageWidth - 2 * margin) + 'mm';
+		tempDiv.style.fontFamily = 'Arial, sans-serif';
+		tempDiv.style.fontSize = '8px';
+		document.body.appendChild(tempDiv);
+		
+		// Create table HTML
+		let tableHTML = `
+			<table style="width: 100%; border-collapse: collapse; font-size: 8px; font-family: Arial, sans-serif;">
+				<thead>
+					<tr style="background-color: rgb(227, 242, 253);">
+		`;
+		summaryHeaders.forEach(header => {
+			tableHTML += `<th style="padding: 3px; border: 1px solid rgb(200, 200, 200); text-align: left; font-weight: bold; color: rgb(40, 40, 40);">${header}</th>`;
+		});
+		tableHTML += `</tr></thead><tbody>`;
+		
+		summaryData.forEach((row, idx) => {
+			const bgColor = idx % 2 === 0 ? 'rgb(255, 255, 255)' : 'rgb(250, 250, 250)';
+			tableHTML += `<tr style="background-color: ${bgColor};">`;
+			row.forEach((cell, cellIdx) => {
+				const align = cellIdx === 0 ? 'center' : (cellIdx === row.length - 1 ? 'right' : 'left');
+				// Escape HTML but preserve Unicode
+				const cellText = String(cell || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+				tableHTML += `<td style="padding: 2px; border: 1px solid rgb(200, 200, 200); text-align: ${align}; color: rgb(60, 60, 60); word-wrap: break-word;">${cellText}</td>`;
+			});
+			tableHTML += `</tr>`;
+		});
+		tableHTML += `</tbody></table>`;
+		
+		tempDiv.innerHTML = tableHTML;
+		
+		// Render table as image using html2canvas
+		if (typeof html2canvas !== 'undefined') {
+			showToast('Rendering table with Unicode support...');
+			html2canvas(tempDiv, {
+				scale: 2,
+				useCORS: true,
+				letterRendering: true,
+				backgroundColor: '#ffffff'
+			}).then(canvas => {
+				const imgData = canvas.toDataURL('image/png');
+				const imgWidth = pageWidth - 2 * margin;
+				const imgHeight = (canvas.height * imgWidth) / canvas.width;
+				
+				// Add image to PDF
+				doc.addImage(imgData, 'PNG', margin, tableTitleY + 5, imgWidth, imgHeight);
+				
+				// Clean up
+				document.body.removeChild(tempDiv);
+				
+				// Continue with rest of PDF generation
+				continuePDFGeneration();
+			}).catch(err => {
+				console.error('html2canvas error:', err);
+				document.body.removeChild(tempDiv);
+				// Fallback to autoTable if html2canvas fails
+				fallbackToAutoTable();
+			});
+		} else {
+			// Fallback if html2canvas not available
+			document.body.removeChild(tempDiv);
+			fallbackToAutoTable();
+		}
+		
+		function fallbackToAutoTable() {
+			const lightBlue = [227, 242, 253];
+			doc.autoTable({
+				startY: tableTitleY + 5,
+				head: [summaryHeaders],
+				body: summaryData,
+				theme: 'striped',
+				headStyles: { 
+					fillColor: lightBlue,
+					textColor: [40, 40, 40],
+					fontStyle: 'bold',
+					fontSize: 9
+				},
+				bodyStyles: { 
+					fontSize: 8,
+					textColor: [60, 60, 60],
+					cellPadding: 2
+				},
+				alternateRowStyles: { 
+					fillColor: [250, 250, 250]
+				},
+				margin: { left: margin, right: margin },
+				styles: { 
+					cellPadding: 2,
+					overflow: 'linebreak',
+					cellWidth: 'wrap',
+					lineWidth: 0.1,
+					lineColor: [200, 200, 200]
+				},
+				columnStyles: {
+					0: { cellWidth: 12, halign: 'center' },
+					1: { cellWidth: 28, halign: 'left' },
+					2: { cellWidth: 45, halign: 'left' },
+					3: { cellWidth: 45, halign: 'left' },
+					4: { cellWidth: 35, halign: 'left' },
+					5: { cellWidth: 15, halign: 'right' }
+				}
+			});
+			continuePDFGeneration();
+		}
+		
+		function continuePDFGeneration() {
+			// Add footer for first page
+			addRealValueFooter(doc);
+			
+			// PAGES 2+: Detailed view for each transaction with all columns
+			// Start first detailed transaction on a new page (page 2)
+			doc.addPage();
+			let pageNum = 2;
+			
+			state.rows.forEach((row, index) => {
+				// For transactions after the first, start on a new page
+				if (index > 0) {
+					// Check if previous table overflowed
+					if (doc.lastAutoTable && doc.lastAutoTable.finalY > pageHeight - 40) {
+						// Already on new page from overflow
+						pageNum = doc.internal.getCurrentPageInfo().pageNumber;
+					} else {
+						doc.addPage();
+						pageNum = doc.internal.getCurrentPageInfo().pageNumber;
+					}
+					addHeader(doc, pageNum);
+					addWatermark(doc);
+				} else {
+					// First detailed transaction - add header
+					addHeader(doc, pageNum);
+					addWatermark(doc);
+				}
+				
+				doc.setFontSize(11);
+				doc.setFont(undefined, 'bold');
+				doc.setTextColor(40, 40, 40);
+				doc.text(`Transaction ${index + 1} of ${state.rows.length}`, margin, margin + 25);
+				
+				// Prepare detailed data - all columns
+				const detailData = [];
+				allColumns.forEach(col => {
+					const val = row[col];
+					let displayVal = '';
+					if (val !== null && val !== undefined) {
+						displayVal = String(val);
+						// Strip HTML tags
+						displayVal = displayVal.replace(/<[^>]*>/g, '');
+						// Limit very long values
+						if (displayVal.length > 200) {
+							displayVal = displayVal.substring(0, 200) + '...';
+						}
+					}
+					detailData.push([
+						{ content: col, styles: { fontStyle: 'bold', fillColor: [240, 240, 240] } },
+						{ content: displayVal, styles: { fontStyle: 'normal' } }
+					]);
+				});
+				
+				const startY = margin + 30;
+				
+				doc.autoTable({
+					startY: startY,
+					head: [['Field', 'Value']],
+					body: detailData,
+					theme: 'striped',
+					headStyles: { 
+						fillColor: [60, 60, 60],
+						textColor: [255, 255, 255],
+						fontStyle: 'bold',
+						fontSize: 9
+					},
+					bodyStyles: { 
+						fontSize: 8,
+						textColor: [40, 40, 40]
+					},
+					alternateRowStyles: { 
+						fillColor: [250, 250, 250]
+					},
+					margin: { left: margin, right: margin },
+					styles: { 
+						cellPadding: 3,
+						overflow: 'linebreak',
+						cellWidth: 'wrap'
+					},
+					columnStyles: {
+						0: { cellWidth: 60, fontStyle: 'bold' },
+						1: { cellWidth: contentWidth - 60 }
+					}
+				});
+			});
+			
+			// Update page numbers in all footers
+			const totalPages = doc.internal.pages.length - 1;
+			for (let i = 1; i <= totalPages; i++) {
+				doc.setPage(i);
+				if (i === 1) {
+					// First page uses Real Value footer
+					addRealValueFooter(doc);
+				} else {
+					addFooter(doc, i, totalPages);
+					addHeader(doc, i);
+					addWatermark(doc);
+				}
+			}
+			
+			// Save the PDF
+			const fileName = `transaction_report_${new Date().toISOString().split('T')[0]}.pdf`;
+			doc.save(fileName);
+			showToast('PDF exported successfully');
+		}
+	}
+
 	el('btnSearch').onclick = fetchSearch;
 	el('btnPhonetics').onclick = fetchPhonetics;
 	el('btnClear').onclick = () => { el('pan').value=''; el('seed').value=''; setStatus('Ready'); };
 	el('btnExport').onclick = exportCSV;
+	el('btnExportPDF').onclick = exportPDF;
 	el('prev').onclick = ()=>{ if (state.page>1){ state.page--; render(); }};
 	el('next').onclick = ()=>{ const pages = Math.max(1, Math.ceil(state.rows.length / state.pageSize)); if (state.page<pages){ state.page++; render(); }};
 	el('pageSize').onchange = (e)=>{ state.pageSize = parseInt(e.target.value, 10) || 100; state.page = 1; render(); };

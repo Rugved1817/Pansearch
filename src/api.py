@@ -155,36 +155,40 @@ def _generate_name_variations_llm(input_name: str) -> dict:
 			"Return valid JSON only. No prose."
 		)
 		user_prompt = (
-			"You are a multilingual transliteration and name variant generator.\n"
-			"You generate all reasonable Marathi and English name variations of a given name.\n\n"
-			"Rules:\n"
-			"1. Do NOT add or remove letters that change pronunciation unnaturally.\n"
-			"2. Preserve original structure; only minor phonetic spelling variations.\n"
-			"3. Avoid adding 'a', 'ha', 'na', or 'nna' endings that change pronunciation.\n"
-			"4. Include Marathi vowel/consonant variants naturally used by Marathi speakers.\n"
-			"   - all combinations of \n"
-			"        'ी': 'ि', 'ि': 'ी', # Velanti\n"
-			"        'ू': 'ु', 'ु': 'ू', # Ukar\n"
-			"5. Include English transliteration variants with minor phonetic differences.\n"
-			"6. Generate short-form and initial-based variations like:\n"
-			"   - Initials (L.S.Jain, L. S. Jain)\n"
-			"   - Mixed (Lakshmi.S.Jain, L.Suresh.Jain)\n"
-			"   - Dotted and spaced forms for Marathi too (ल.स.जैन, लक्ष्मी.स.जैन)\n"
-			"7. Ensure both English and Marathi variants have:\n"
-			"   - Normal full names\n"
-			"   - Abbreviated names (with initials)\n"
-			"   - Punctuated forms (with or without spaces)\n"
-			"8. Return valid JSON only, with two keys: \"marathi_variations\" and \"english_variations\".\n\n"
-			f"Name: {input_name}\n\n"
-			"Example format:\n"
-			"{\n"
-			"  \"marathi_variations\": [\n"
-			"    \"लक्ष्मी सुरेश जैन\", \"लक्स्मी सुरेश जैन\", \"ल.स.जैन\", \"लक्ष्मी.स.जैन\"\n"
-			"  ],\n"
-			"  \"english_variations\": [\n"
-			"    \"Lakshmi Suresh Jain\", \"Laxmi Suresh Jain\", \"L.S.Jain\", \"L. S. Jain\", \"Lakshmi.S.Jain\"\n"
-			"  ]\n"
-			"}"
+			"""
+You are a multilingual transliteration and name variant generator.
+You generate all reasonable Marathi and English name variations of a given name.
+
+Rules:
+1. Do NOT add or remove letters that change pronunciation unnaturally.
+2. Preserve original structure; only minor phonetic spelling variations.
+3. Avoid adding 'a', 'ha', 'na', or 'nna' endings that change pronunciation.
+4. Include Marathi vowel/consonant variants naturally used by Marathi speakers.
+   -all combinations of 
+        'ी': 'ि', 'ि': 'ी', # Velanti
+        'ू': 'ु', 'ु': 'ू', # Ukar
+5. Include English transliteration variants with minor phonetic differences.
+6. Generate short-form and initial-based variations like:
+   - Initials (L S Jain)
+   - Mixed (Lakshmi S Jain, L Suresh Jain)
+   - Dotted and spaced forms for Marathi too (ल स जैन, लक्ष्मी स जैन)
+7. Ensure both English and Marathi variants have:
+   - Normal full names
+   - Abbreviated names (with initials)
+   - Punctuated forms (with or without spaces)
+8. Return valid JSON only, with two keys: "marathi_variations" and "english_variations".
+
+Example format:
+{
+  "marathi_variations": [
+    "लक्ष्मी सुरेश जैन", "लक्स्मी सुरेश जैन", "ल सु जैन", "लक्ष्मी सु जैन" .... all combinations of 'ी': 'ि', 'ि': 'ी', # Velanti
+        'ू': 'ु', 'ु': 'ू', # Ukar
+  ],
+  "english_variations": [
+    "Lakshmi Suresh Jain", "Laxmi Suresh Jain", "L S Jain", "Lakshmi S Jain"
+  ]
+}
+"""
 		)
 		
 		resp = client.chat.completions.create(
@@ -301,6 +305,10 @@ def search(
 		# Prepare scoring context
 		idx_name = cols.index("name_norm") if "name_norm" in cols else -1
 		idx_pan = cols.index("pan_upper") if "pan_upper" in cols else -1
+		idx_year = cols.index("year") if "year" in cols else -1
+		# Log if year column is missing (for debugging)
+		if idx_year == -1:
+			logger.warning("'year' column not found in transactions table schema. Available columns: %s", cols[:10])
 		base_names: list[str] = []
 		if pan:
 			try:
@@ -324,6 +332,16 @@ def search(
 			# drop internal helper columns from API response
 			item.pop("pan_upper", None)
 			item.pop("pan_raw", None)
+			# Ensure year column is included (explicitly set if it exists in the row)
+			# The dict(zip()) should already include it, but we explicitly ensure it's there
+			if idx_year >= 0:
+				if idx_year < len(row):
+					item["year"] = row[idx_year]
+				else:
+					# Row doesn't have enough elements - this shouldn't happen but handle gracefully
+					logger.warning("Row length mismatch: expected year at index %d but row has %d elements", idx_year, len(row))
+					item["year"] = None
+			# The year column is needed for age calculation on the client side
 			item["match_score"] = round(float(score), 3)
 			# Add highlight for seed_name searches: highlight ALL tokens in the matched field
 			if seed_name:

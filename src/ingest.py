@@ -74,11 +74,10 @@ def write_partitioned_parquet(df: pl.LazyFrame, out_dir: str, rows_per_file: int
 
 def main(csv_path: str, out_dir: str, rows_per_file: int) -> None:
 	scan = pl.scan_csv(csv_path, infer_schema_length=20000, ignore_errors=True)
-	# Select available columns
-	want = [c for c in [COLS.pan, COLS.name, getattr(COLS, "alt_name", None)] if c]
-	needed = [c for c in want if c in scan.columns]
-	lf = scan.select(needed)
-	df = lf.collect()
+	# Select all columns from CSV to preserve everything including 'year'
+	# The derive_columns function only adds new columns, so all original columns are preserved
+	# This ensures year and other important columns are available in the database
+	df = scan.collect()
 	df = derive_columns(df)
 	write_partitioned_parquet(df.lazy(), out_dir, rows_per_file)
 
