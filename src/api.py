@@ -3,11 +3,10 @@ import logging
 from typing import List, Optional
 import re
 import json
-import time
-import sqlite3
 import urllib.parse
 import urllib.request
 from openai import OpenAI
+import httpx
 
 import duckdb
 from fastapi import FastAPI, HTTPException, Query
@@ -53,214 +52,131 @@ def health() -> dict:
 	return {"status": "ok"}
 
 
-# -------------------- Phonetics Cache (24h, memory + disk) --------------------
-_PHON_CACHE_TTL_SEC = 24 * 3600
-_PHON_CACHE_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "phonetics_cache.sqlite")
-_phon_cache_mem: dict[str, tuple[int, list[str], list[str]]] = {}
-
-def _ensure_cache_db() -> None:
-    os.makedirs(os.path.join(os.path.dirname(os.path.dirname(__file__)), "data"), exist_ok=True)
-    con = sqlite3.connect(_PHON_CACHE_PATH)
-    try:
-        con.execute(
-            """
-            CREATE TABLE IF NOT EXISTS variants (
-                k TEXT PRIMARY KEY,
-                ts INTEGER NOT NULL,
-                english TEXT NOT NULL,
-                marathi TEXT NOT NULL
-            )
-            """
-        )
-        con.commit()
-    finally:
-        con.close()
-
-def _cache_get_variants(key: str) -> Optional[dict]:
-    if not key:
-        return None
-    now = int(time.time())
-    # memory
-    tup = _phon_cache_mem.get(key)
-    if tup and now - tup[0] <= _PHON_CACHE_TTL_SEC:
-        return {"english_variants": tup[1], "marathi_variants": tup[2]}
-    # disk
-    try:
-        _ensure_cache_db()
-        con = sqlite3.connect(_PHON_CACHE_PATH)
-        try:
-            row = con.execute("SELECT ts, english, marathi FROM variants WHERE k = ?", [key]).fetchone()
-            if not row:
-                return None
-            ts_val, eng_json, mar_json = row
-            if now - int(ts_val) > _PHON_CACHE_TTL_SEC:
-                return None
-            eng = json.loads(eng_json)
-            mar = json.loads(mar_json)
-            # populate memory
-            _phon_cache_mem[key] = (int(ts_val), eng, mar)
-            return {"english_variants": eng, "marathi_variants": mar}
-        finally:
-            con.close()
-    except Exception:
-        return None
-
-def _cache_put_variants(key: str, english: list[str], marathi: list[str]) -> None:
-    if not key:
-        return
-    now = int(time.time())
-    # memory
-    _phon_cache_mem[key] = (now, english, marathi)
-    # disk
-    try:
-        _ensure_cache_db()
-        con = sqlite3.connect(_PHON_CACHE_PATH)
-        try:
-            con.execute(
-                "INSERT INTO variants(k, ts, english, marathi) VALUES(?, ?, ?, ?)\n"
-                "ON CONFLICT(k) DO UPDATE SET ts=excluded.ts, english=excluded.english, marathi=excluded.marathi",
-                [key, now, json.dumps(english, ensure_ascii=False), json.dumps(marathi, ensure_ascii=False)],
-            )
-            con.commit()
-        finally:
-            con.close()
-    except Exception:
-        pass
-
-def _generate_name_variations_llm(input_name: str) -> dict:
+def _generate_name_variations_llm(name: str) -> dict:
 	"""
 	Use LLM to generate realistic name variations in both English and Marathi.
 	Returns dict with 'english_variants' and 'marathi_variants' lists.
 	"""
-	if not input_name:
+	if not name:
 		return {"english_variants": [], "marathi_variants": []}
-	# cache lookup by normalized key
-	try:
-		norm_key = nlp.normalize_name(input_name)
-	except Exception:
-		norm_key = (input_name or "").strip().lower()
-	cached = _cache_get_variants(norm_key)
-	if cached:
-		return cached
 	
 	try:
+		# Create custom httpx client to avoid proxies parameter issue
+		http_client = httpx.Client(timeout=30.0)
 		client = OpenAI(
 			base_url="http://192.168.1.198:11434/v1",
-			api_key="ollama"
+			api_key="ollama",
+			http_client=http_client
 		)
 
-		# Prompt updated per user's specification
-		system_prompt = (
-			"You are a multilingual transliteration and name variant generator.\n"
-			"Return valid JSON only. No prose."
-		)
-		user_prompt = (
-			"You are a multilingual transliteration and name variant generator.\n"
-			"You generate all reasonable Marathi and English name variations of a given name.\n\n"
-			"Rules:\n"
-			"1. Do NOT add or remove letters that change pronunciation unnaturally.\n"
-			"2. Preserve original structure; only minor phonetic spelling variations.\n"
-			"3. Avoid adding 'a', 'ha', 'na', or 'nna' endings that change pronunciation.\n"
-			"4. Include Marathi vowel/consonant variants naturally used by Marathi speakers.\n"
-			"   - all combinations of \n"
-			"        'ी': 'ि', 'ि': 'ी', # Velanti\n"
-			"        'ू': 'ु', 'ु': 'ू', # Ukar\n"
-			"5. Include English transliteration variants with minor phonetic differences.\n"
-			"6. Generate short-form and initial-based variations like:\n"
-			"   - Initials (L.S.Jain, L. S. Jain)\n"
-			"   - Mixed (Lakshmi.S.Jain, L.Suresh.Jain)\n"
-			"   - Dotted and spaced forms for Marathi too (ल.स.जैन, लक्ष्मी.स.जैन)\n"
-			"7. Ensure both English and Marathi variants have:\n"
-			"   - Normal full names\n"
-			"   - Abbreviated names (with initials)\n"
-			"   - Punctuated forms (with or without spaces)\n"
-			"8. Return valid JSON only, with two keys: \"marathi_variations\" and \"english_variations\".\n\n"
-			f"Name: {input_name}\n\n"
-			"Example format:\n"
-			"{\n"
-			"  \"marathi_variations\": [\n"
-			"    \"लक्ष्मी सुरेश जैन\", \"लक्स्मी सुरेश जैन\", \"ल.स.जैन\", \"लक्ष्मी.स.जैन\"\n"
-			"  ],\n"
-			"  \"english_variations\": [\n"
-			"    \"Lakshmi Suresh Jain\", \"Laxmi Suresh Jain\", \"L.S.Jain\", \"L. S. Jain\", \"Lakshmi.S.Jain\"\n"
-			"  ]\n"
-			"}"
-		)
+		system_prompt = """
+You are a multilingual transliteration and name variant generator.
+
+You generate all reasonable Marathi and English name variations of a given name.
+
+Rules:
+
+1. Do NOT add or remove letters that change pronunciation unnaturally.
+
+2. Preserve original structure; only minor phonetic spelling variations.
+
+3. Avoid adding 'a', 'ha', 'na', or 'nna' endings that change pronunciation.
+
+4. Include Marathi vowel/consonant variants naturally used by Marathi speakers.
+
+   -all combinations of 
+
+        'ी': 'ि', 'ि': 'ी', # Velanti
+
+        'ू': 'ु', 'ु': 'ू', # Ukar
+
+5. Include English transliteration variants with minor phonetic differences.
+
+6. Generate short-form and initial-based variations like:
+
+   - Initials (L S Jain)
+
+   - Mixed (Lakshmi S Jain, L Suresh Jain)
+
+   - Dotted and spaced forms for Marathi too (ल स जैन, लक्ष्मी स जैन)
+
+7. Ensure both English and Marathi variants have:
+
+   - Normal full names
+
+   - Abbreviated names (with initials)
+
+   - Punctuated forms (with or without spaces)
+
+8. Return valid JSON only, with two keys: "marathi_variations" and "english_variations".
+
+Example format:
+
+{
+
+  "marathi_variations": [
+
+    "लक्ष्मी सुरेश जैन", "लक्स्मी सुरेश जैन", "ल सु जैन", "लक्ष्मी सु जैन" .... all combinations of 'ी': 'ि', 'ि': 'ी', # Velanti
+
+        'ू': 'ु', 'ु': 'ू', # Ukar
+
+  ],
+
+  "english_variations": [
+
+    "Lakshmi Suresh Jain", "Laxmi Suresh Jain", "L S Jain", "Lakshmi S Jain"
+
+  ]
+
+}
+
+"""
 		
 		resp = client.chat.completions.create(
-			model="gpt-oss:20b",
+			model="gpt-oss:20b",  # or your chosen local Ollama model
 			messages=[
 				{"role": "system", "content": system_prompt},
-				{"role": "user", "content": user_prompt},
-			],
-			temperature=0,
+				{"role": "user", "content": f"Generate name variations for: {name}"}
+			]
 		)
 		
-		text = (resp.choices[0].message.content or "").strip()
+		text = resp.choices[0].message.content.strip()
 		if not text:
 			logger.warning("LLM returned empty content for name variations")
 			return {"english_variants": [], "marathi_variants": []}
 		
-		# Try to parse JSON from response
-		result = None
 		try:
 			result = json.loads(text)
 		except Exception:
-			# Try to extract JSON from markdown code blocks or other wrappers
-			json_match = re.search(r"\{[\s\S]*\"(?:marathi_variations|english_variations|variations|english_variants|marathi_variants)\"[\s\S]*\}", text)
-			if json_match:
-				try:
-					result = json.loads(json_match.group(0))
-				except Exception:
-					pass
-
-		if result:
-			# Support multiple shapes:
-			# 1) New: { marathi_variations: [], english_variations: [] }
-			# 2) Old nested: { variations: { english: [], marathi: [] } }
-			# 3) Legacy: { english_variants: [], marathi_variants: [] }
-			if "marathi_variations" in result or "english_variations" in result:
-				english_variants = result.get("english_variations", [])
-				marathi_variants = result.get("marathi_variations", [])
-			elif "variations" in result and isinstance(result["variations"], dict):
-				english_variants = result["variations"].get("english", [])
-				marathi_variants = result["variations"].get("marathi", [])
-			else:
-				english_variants = result.get("english_variants", [])
-				marathi_variants = result.get("marathi_variants", [])
-			# Ensure they're lists and limit to reasonable size
-			if isinstance(english_variants, list):
-				english_variants = english_variants[:12]
-			else:
-				english_variants = []
-			if isinstance(marathi_variants, list):
-				marathi_variants = marathi_variants[:12]
-			else:
-				marathi_variants = []
-			# write cache
+			# fallback: clean up if the model returns non-JSON text
 			try:
-				_cache_put_variants(norm_key, english_variants, marathi_variants)
-			except Exception:
-				pass
-			return {"english_variants": english_variants, "marathi_variants": marathi_variants}
-		else:
-			logger.warning(f"Could not parse LLM response for name variations: {text[:100]}")
-			return {"english_variants": [], "marathi_variants": []}
+				start_idx = text.find("{")
+				end_idx = text.rfind("}")
+				if start_idx >= 0 and end_idx > start_idx:
+					text = text[start_idx:end_idx + 1]
+					result = json.loads(text)
+				else:
+					logger.warning(f"Could not extract JSON from LLM response: {text[:100]}")
+					return {"english_variants": [], "marathi_variants": []}
+			except Exception as e:
+				logger.warning(f"Could not parse LLM response: {e}")
+				return {"english_variants": [], "marathi_variants": []}
+		
+		# Extract variations from result
+		english_variants = result.get("english_variations", [])
+		marathi_variants = result.get("marathi_variations", [])
+		
+		# Ensure they're lists
+		if not isinstance(english_variants, list):
+			english_variants = []
+		if not isinstance(marathi_variants, list):
+			marathi_variants = []
+		
+		return {"english_variants": english_variants, "marathi_variants": marathi_variants}
 			
 	except Exception as e:
 		logger.exception("LLM name variation generation failed: %s", e)
-		# Fallback to simple phonetic generation on error
-		try:
-			vars = nlp.generate_all_name_variations(input_name)
-			eng = list(vars.get("english", []))[:12]
-			mar = list(vars.get("marathi", []))[:12]
-			try:
-				_cache_put_variants(norm_key, eng, mar)
-			except Exception:
-				pass
-			return {"english_variants": eng, "marathi_variants": mar}
-		except Exception:
-			return {"english_variants": [], "marathi_variants": []}
+		return {"english_variants": [], "marathi_variants": []}
 
 
 @app.get("/phonetics")
@@ -402,9 +318,12 @@ def _extract_person_name_llm(raw_name: str) -> Optional[str]:
 	if not raw_name:
 		return None
 	try:
+		# Create custom httpx client to avoid proxies parameter issue
+		http_client = httpx.Client(timeout=30.0)
 		client = OpenAI(
 			base_url="http://192.168.1.198:11434/v1",
-			api_key="ollama"
+			api_key="ollama",
+			http_client=http_client
 		)
 		system_prompt = "Return JSON only. You extract concise person names."
 		user_prompt = (
