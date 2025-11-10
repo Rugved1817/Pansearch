@@ -290,7 +290,8 @@
 				{ header: 'Buyer', key: 'buyer' },
 				{ header: 'Seller', key: 'seller' },
 				{ header: 'Name', key: 'Name' },
-				{ header: 'Age', key: 'Age' },
+				{ header: 'Current Age', key: 'Age' },
+				{ header: 'Property Type', key: 'property_type' },
 			];
 			state.colsDisplay = desired.map(d => d.header);
 			state.colMap = Object.fromEntries(desired.map(d => [d.header, d.key]));
@@ -404,7 +405,53 @@
 		return str;
 	}
 
-	function exportPDF(){
+	async function exportPDF(){
+		// Get current search parameters
+		const pan = el('pan').value.trim();
+		const seed = el('seed').value.trim();
+		if (!pan && !seed) {
+			showToast('Enter PAN or Name to export PDF');
+			return;
+		}
+		
+		// Get current threshold
+		const threshold = state.threshold || 0.75;
+		
+		// Build query string
+		const qs = new URLSearchParams();
+		if (pan) qs.set('pan', pan);
+		if (seed) qs.set('seed_name', seed);
+		qs.set('limit', '5000');
+		qs.set('threshold', String(threshold));
+		
+		showToast('Generating PDF...');
+		
+		try {
+			const res = await fetch(`${API_BASE}/export_pdf?${qs.toString()}`);
+			if (!res.ok) {
+				const errorText = await res.text();
+				throw new Error(errorText || 'PDF generation failed');
+			}
+			
+			// Get PDF blob
+			const blob = await res.blob();
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = `transaction_report_${new Date().toISOString().split('T')[0]}.pdf`;
+			document.body.appendChild(a);
+			a.click();
+			document.body.removeChild(a);
+			URL.revokeObjectURL(url);
+			showToast('PDF exported successfully');
+		} catch(e) {
+			console.error('PDF export error:', e);
+			showToast('PDF export failed: ' + (e.message || 'Unknown error'));
+		}
+	}
+	
+	// Old client-side PDF generation (kept for reference, but not used)
+	function exportPDF_old(){
 		if (!state.rows.length){ showToast('No data'); return; }
 		if (typeof window.jspdf === 'undefined') {
 			showToast('PDF library not loaded');
