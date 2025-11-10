@@ -62,7 +62,7 @@ def _generate_name_variations_llm(name: str) -> dict:
 	
 	try:
 		# Create custom httpx client to avoid proxies parameter issue
-		http_client = httpx.Client(timeout=30.0)
+		http_client = httpx.Client(timeout=120.0)
 		client = OpenAI(
 			base_url="http://192.168.1.198:11434/v1",
 			api_key="ollama",
@@ -70,67 +70,60 @@ def _generate_name_variations_llm(name: str) -> dict:
 		)
 
 		system_prompt = """
-You are a multilingual transliteration and name variant generator.
+You are a multilingual name variation generator for Marathi and English names.
 
-You generate all reasonable Marathi and English name variations of a given name.
+Your task is to generate all *valid and realistic* name variations for a given input name.
 
-Rules:
+STRICT RULES (Must Follow):
+1. Do NOT create unnatural or incorrect spellings.
+   - Only produce variations commonly used by native Marathi or English speakers.
+   - DO NOT add or remove consonants.
+   - DO NOT add random “a”, “ha”, “na”, “nna”, “aa”, “yaa”, “ayya” endings.
+   - Keep pronunciation same.
 
-1. Do NOT add or remove letters that change pronunciation unnaturally.
+2. Allowed modifications for MARATHI:
+   - Apply ONLY natural matra swaps:
+        'ी' ↔ 'ि'   (Velanti)
+        'ू' ↔ 'ु'   (Ukar)
+   - Consider realistic native variations (e.g., क्ष vs क्श is allowed, but only if natural).
+   - Maintain correct placement of matras (e.g., “लक्ष्मी” → “लक्ष्मि”, not “लक्षीम”).
 
-2. Preserve original structure; only minor phonetic spelling variations.
+3. For ENGLISH names:
+   - Only minor transliteration variations are allowed (Lakshmi/Laxmi/Lakshmee).
+   - DO NOT add weird spellings like “Laxhmaee”, “Lukshami”, “Lashmi”, etc.
+   - Keep pronunciation SAME.
+   - ✅ Allowed English vowel-sound variations:
+        - i ↔ ee (Dipti → Deepti)
+        - ti ↔ tee (Dipti → Diptee)
+        - Combine if still natural (Deepti, Deeptee)
+     These are allowed ONLY if they reflect natural pronunciation and do not alter consonants.
 
-3. Avoid adding 'a', 'ha', 'na', or 'nna' endings that change pronunciation.
+4. Initial-based Variations (Generate for both Marathi & English):
+   - Full initials: L S Jain, L.S. Jain, L S J
+   - Mixed forms: Lakshmi S Jain, L Suresh Jain, लक्ष्मी सु जैन, ल सु जैन
+   - Marathi initials must preserve the original swar–matra from the name.
+    Examples:
+        सुरेश → सु. (NOT स.)
+        दीपक → दी. (NOT दि. or द.)
+        हुकमीचंद → हु. (NOT ह.)
+    - Allowed initial forms:
+        a) First अक्षर + matra (सु, हु, रा.)
 
-4. Include Marathi vowel/consonant variants naturally used by Marathi speakers.
+    !! dont break the name into parts 
+    for example:
+    चांदीवाला -> चांदी वाला is not allowed
 
-   -all combinations of 
+5. Output MUST ALWAYS include for BOTH MARATHI AND ENGLISH:
+   a) Full name variations
+   b) Initial-based variations
+   c) Mixed variations (half initials, half full)
+   d) Punctuated forms (with/without dots and spaces)
 
-        'ी': 'ि', 'ि': 'ी', # Velanti
-
-        'ू': 'ु', 'ु': 'ू', # Ukar
-
-5. Include English transliteration variants with minor phonetic differences.
-
-6. Generate short-form and initial-based variations like:
-
-   - Initials (L S Jain)
-
-   - Mixed (Lakshmi S Jain, L Suresh Jain)
-
-   - Dotted and spaced forms for Marathi too (ल स जैन, लक्ष्मी स जैन)
-
-7. Ensure both English and Marathi variants have:
-
-   - Normal full names
-
-   - Abbreviated names (with initials)
-
-   - Punctuated forms (with or without spaces)
-
-8. Return valid JSON only, with two keys: "marathi_variations" and "english_variations".
-
-Example format:
-
-{
-
-  "marathi_variations": [
-
-    "लक्ष्मी सुरेश जैन", "लक्स्मी सुरेश जैन", "ल सु जैन", "लक्ष्मी सु जैन" .... all combinations of 'ी': 'ि', 'ि': 'ी', # Velanti
-
-        'ू': 'ु', 'ु': 'ू', # Ukar
-
-  ],
-
-  "english_variations": [
-
-    "Lakshmi Suresh Jain", "Laxmi Suresh Jain", "L S Jain", "Lakshmi S Jain"
-
-  ]
-
-}
-
-"""
+6. FORMAT RULES (MANDATORY):
+   - Output only valid JSON.
+   - Keys must be exactly: "marathi_variations" and "english_variations".
+   - Values must be arrays of strings.
+		"""
 		
 		resp = client.chat.completions.create(
 			model="gpt-oss:20b",  # or your chosen local Ollama model
