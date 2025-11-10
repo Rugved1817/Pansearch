@@ -7,6 +7,9 @@ import urllib.parse
 import urllib.request
 from openai import OpenAI
 import httpx
+from indic_transliteration import sanscript
+from indic_transliteration.sanscript import transliterate
+import regex
 
 import duckdb
 from fastapi import FastAPI, HTTPException, Query
@@ -52,131 +55,174 @@ def health() -> dict:
 	return {"status": "ok"}
 
 
-def _generate_name_variations_llm(name: str) -> dict:
+def is_devanagari(text: str) -> bool:
+	"""Return True if any character is Devanagari."""
+	return bool(re.search(r"[\u0900-\u097F]", text or ""))
+
+
+def clean_english_name(raw_english: str) -> str:
 	"""
-	Use LLM to generate realistic name variations in both English and Marathi.
-	Returns dict with 'english_variants' and 'marathi_variants' lists.
+	Clean ITRANS generated English text to title-case names without trailing schwa.
 	"""
+	if not raw_english:
+		return ""
+	raw_english = raw_english.replace("\u00A0", " ").replace("\xa0", " ").strip()
+	cleaned_words: list[str] = []
+	for word in raw_english.split():
+		w = re.sub(r"(?<=[^aeiou])a$", "", word, flags=re.IGNORECASE)
+		w = w.lower().capitalize()
+		cleaned_words.append(w)
+	return " ".join(cleaned_words)
+
+
+def generate_english_spelling_variations(name: str, rules: dict[str, list[str]]) -> set[str]:
+	"""Recursively generate phonetic spelling variations based on rules."""
+	if not name:
+		return {""}
+	char = name[0]
+	rest = name[1:]
+	vars_rest = generate_english_spelling_variations(rest, rules)
+	current: set[str] = set()
+	for substitution in rules.get(char, [char]):
+		for variant in vars_rest:
+			current.add(f"{substitution}{variant}")
+	return current
+
+
+def generate_all_name_variations(input_name: str) -> dict[str, set[str]]:
+	"""Generate base Marathi/English variants by transliteration rules."""
+	if not input_name:
+		return {"marathi": set(), "english": set()}
+
+	base_english = ""
+	base_devanagari = ""
+
+	try:
+		if is_devanagari(input_name):
+			base_devanagari = input_name
+			raw_base_english = transliterate(input_name, sanscript.DEVANAGARI, sanscript.ITRANS)
+			base_english = clean_english_name(raw_base_english).lower()
+		else:
+			base_english = clean_english_name(input_name).lower()
+			try:
+				base_devanagari = transliterate(base_english, sanscript.ITRANS, sanscript.DEVANAGARI)
+			except Exception:
+				temp_name = base_english.replace("i", "ee").replace("oo", "U")
+				base_devanagari = transliterate(temp_name, sanscript.ITRANS, sanscript.DEVANAGARI)
+	except Exception as exc:
+		logger.warning("Transliteration failed for '%s': %s", input_name, exc)
+		# Fall back to returning the original name in whichever script it was provided
+		if is_devanagari(input_name):
+			return {"marathi": {input_name}, "english": set()}
+		return {"marathi": set(), "english": {clean_english_name(input_name)}}
+
+	logger.debug("Detected base names -> English: '%s', Marathi: '%s'", base_english, base_devanagari)
+
+	marathi_variations: set[str] = {base_devanagari} if base_devanagari else set()
+	rules_marathi = {
+		"ी": "ि",
+		"ि": "ी",
+		"ू": "ु",
+		"ु": "ू",
+		"श": "स",
+		"स": "श",
+		"व": "व",
+		"ब": "ब",
+	}
+	for _ in range(2):
+		temp_variations: set[str] = set()
+		for name in marathi_variations:
+			for char, replacement in rules_marathi.items():
+				if char in name:
+					temp_variations.add(name.replace(char, replacement, 1))
+		marathi_variations.update(temp_variations)
+
+	english_variations: set[str] = set()
+	for name in marathi_variations:
+		try:
+			raw_english = transliterate(name.replace("\u00A0", " "), sanscript.DEVANAGARI, sanscript.ITRANS)
+			cleaned = clean_english_name(raw_english)
+			if cleaned:
+				english_variations.add(cleaned)
+		except Exception:
+			continue
+
+	rules_english = {
+		"i": ["i", "e"],
+		"u": ["u", "o"],
+		"v": ["v", "w"],
+		"j": ["j", "z"],
+	}
+	for variant in generate_english_spelling_variations(base_english, rules_english):
+		cleaned = clean_english_name(variant)
+		if cleaned:
+			english_variations.add(cleaned)
+
+	return {
+		"marathi": {v for v in marathi_variations if v},
+		"english": {v for v in english_variations if v},
+	}
+
+
+def get_marathi_initial(word: str) -> str:
+	if not word:
+		return ""
+	match = regex.match(r"\X", word)
+	return match.group(0) if match else word[:1]
+
+
+def get_english_initial(word: str) -> str:
+	return word[0].lower() if word else ""
+
+
+def add_initial_variations(name_dict: dict[str, set[str]]) -> dict[str, set[str]]:
+	def generate_variants(name: str, *, is_marathi: bool) -> set[str]:
+		parts = name.split()
+		if len(parts) < 2:
+			return set()
+		first = parts[0]
+		middle = parts[1] if len(parts) == 3 else ""
+		last = parts[-1]
+
+		if is_marathi:
+			first_i = get_marathi_initial(first)
+			middle_i = get_marathi_initial(middle) if middle else ""
+			last_i = get_marathi_initial(last)
+		else:
+			first_i = get_english_initial(first)
+			middle_i = get_english_initial(middle) if middle else ""
+			last_i = get_english_initial(last)
+
+		variants: set[str] = set()
+		if middle:
+			variants.add(f"{first_i} {middle_i} {last}")
+			variants.add(f"{first_i} {middle_i}")
+			variants.add(f"{first} {middle_i} {last}")
+			variants.add(f"{first_i} {middle} {last}")
+		else:
+			variants.add(f"{first_i} {last}")
+			variants.add(f"{first} {last_i}")
+		return {v.strip() for v in variants if v.strip()}
+
+	new_marathi = set(name_dict.get("marathi", []))
+	for name in list(new_marathi):
+		new_marathi |= generate_variants(name, is_marathi=True)
+
+	new_english = set(name_dict.get("english", []))
+	for name in list(new_english):
+		new_english |= generate_variants(name, is_marathi=False)
+
+	return {"marathi": new_marathi, "english": new_english}
+
+
+def _generate_name_variations(name: str) -> dict:
 	if not name:
 		return {"english_variants": [], "marathi_variants": []}
-	
-	try:
-		# Create custom httpx client to avoid proxies parameter issue
-		http_client = httpx.Client(timeout=30.0)
-		client = OpenAI(
-			base_url="http://192.168.1.198:11434/v1",
-			api_key="ollama",
-			http_client=http_client
-		)
-
-		system_prompt = """
-You are a multilingual transliteration and name variant generator.
-
-You generate all reasonable Marathi and English name variations of a given name.
-
-Rules:
-
-1. Do NOT add or remove letters that change pronunciation unnaturally.
-
-2. Preserve original structure; only minor phonetic spelling variations.
-
-3. Avoid adding 'a', 'ha', 'na', or 'nna' endings that change pronunciation.
-
-4. Include Marathi vowel/consonant variants naturally used by Marathi speakers.
-
-   -all combinations of 
-
-        'ी': 'ि', 'ि': 'ी', # Velanti
-
-        'ू': 'ु', 'ु': 'ू', # Ukar
-
-5. Include English transliteration variants with minor phonetic differences.
-
-6. Generate short-form and initial-based variations like:
-
-   - Initials (L S Jain)
-
-   - Mixed (Lakshmi S Jain, L Suresh Jain)
-
-   - Dotted and spaced forms for Marathi too (ल स जैन, लक्ष्मी स जैन)
-
-7. Ensure both English and Marathi variants have:
-
-   - Normal full names
-
-   - Abbreviated names (with initials)
-
-   - Punctuated forms (with or without spaces)
-
-8. Return valid JSON only, with two keys: "marathi_variations" and "english_variations".
-
-Example format:
-
-{
-
-  "marathi_variations": [
-
-    "लक्ष्मी सुरेश जैन", "लक्स्मी सुरेश जैन", "ल सु जैन", "लक्ष्मी सु जैन" .... all combinations of 'ी': 'ि', 'ि': 'ी', # Velanti
-
-        'ू': 'ु', 'ु': 'ू', # Ukar
-
-  ],
-
-  "english_variations": [
-
-    "Lakshmi Suresh Jain", "Laxmi Suresh Jain", "L S Jain", "Lakshmi S Jain"
-
-  ]
-
-}
-
-"""
-		
-		resp = client.chat.completions.create(
-			model="gpt-oss:20b",  # or your chosen local Ollama model
-			messages=[
-				{"role": "system", "content": system_prompt},
-				{"role": "user", "content": f"Generate name variations for: {name}"}
-			]
-		)
-		
-		text = resp.choices[0].message.content.strip()
-		if not text:
-			logger.warning("LLM returned empty content for name variations")
-			return {"english_variants": [], "marathi_variants": []}
-		
-		try:
-			result = json.loads(text)
-		except Exception:
-			# fallback: clean up if the model returns non-JSON text
-			try:
-				start_idx = text.find("{")
-				end_idx = text.rfind("}")
-				if start_idx >= 0 and end_idx > start_idx:
-					text = text[start_idx:end_idx + 1]
-					result = json.loads(text)
-				else:
-					logger.warning(f"Could not extract JSON from LLM response: {text[:100]}")
-					return {"english_variants": [], "marathi_variants": []}
-			except Exception as e:
-				logger.warning(f"Could not parse LLM response: {e}")
-				return {"english_variants": [], "marathi_variants": []}
-		
-		# Extract variations from result
-		english_variants = result.get("english_variations", [])
-		marathi_variants = result.get("marathi_variations", [])
-		
-		# Ensure they're lists
-		if not isinstance(english_variants, list):
-			english_variants = []
-		if not isinstance(marathi_variants, list):
-			marathi_variants = []
-		
-		return {"english_variants": english_variants, "marathi_variants": marathi_variants}
-			
-	except Exception as e:
-		logger.exception("LLM name variation generation failed: %s", e)
-		return {"english_variants": [], "marathi_variants": []}
+	base_variations = generate_all_name_variations(name)
+	with_initials = add_initial_variations(base_variations)
+	english = sorted(with_initials.get("english", []))
+	marathi = sorted(with_initials.get("marathi", []))
+	return {"english_variants": english, "marathi_variants": marathi}
 
 
 @app.get("/phonetics")
@@ -184,13 +230,13 @@ def phonetics(seed_name: str = Query(..., description="Name to generate phonetic
 	if not seed_name:
 		raise HTTPException(status_code=400, detail="seed_name required")
 	
-	variations = _generate_name_variations_llm(seed_name)
+	variations = _generate_name_variations(seed_name)
 	
 	return {
 		"input": seed_name,
 		"variations": {
-			"english": set(variations.get("english_variants", [])),
-			"marathi": set(variations.get("marathi_variants", [])),
+			"english": variations.get("english_variants", []),
+			"marathi": variations.get("marathi_variants", []),
 		},
 	}
 
