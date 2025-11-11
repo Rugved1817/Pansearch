@@ -552,11 +552,24 @@ def pan_meta(pan: str = Query(..., description="PAN to fetch metadata for")) -> 
 				age = age_num
 			except Exception:
 				pass
+		# Parse likely person names from name for frontend badge
+		names = _extract_person_names_from_name_field(name or "") if name else []
+		names_joined = ", ".join(names) if names else ""
 		# Return raw name without LLM extraction
 		extracted = None
 		final_name = name
 		extraction_error = None
-		return {"pan": pan_id, "name": final_name, "extracted_name": extracted, "raw_name": name, "age": age, "raw": data, "extraction_error": extraction_error}
+		return {
+			"pan": pan_id,
+			"name": final_name,
+			"extracted_name": extracted,
+			"names": names,
+			"names_joined": names_joined,
+			"raw_name": name,
+			"age": age,
+			"raw": data,
+			"extraction_error": extraction_error,
+		}
 	except Exception as e:
 		logger.exception("PAN meta upstream error for %s: %s", pan_id, e)
 		raise HTTPException(status_code=502, detail=f"upstream error: {e}")
@@ -1294,6 +1307,92 @@ def _add_page_header_footer(canvas, doc, logo_path=None, footer_path=None):
 			canvas.drawRightString(page_width - 15*mm, footer_y - 13*mm, "+91 88284 05969")
 	
 	canvas.restoreState()
+
+
+def _extract_person_names_from_name_field(text: str) -> List[str]:
+	"""
+	Extract likely personal names from mixed Marathi/English 'name' field.
+	Example input:
+	'ओम साई गणेश बिल्डर्स अँड डेव्हलपर्स प्रा ली चे संचालक यश रितेश मुथा तर्फे मुखत्यार अजित भोईर'
+	Expected output:
+	['यश रितेश मुथा', 'अजित भोईर']
+	"""
+	if not text:
+		return []
+	original = str(text).strip()
+	s = re.sub(r"\s+", " ", original)
+	# If phrase includes role markers before the people names, keep tail after last marker
+	role_markers = ["संचालक", "प्रतिनिधी", "अधिकृत", "पॉवर ऑफ अटॉर्नी", "अध्यक्ष", "चे"]
+	for marker in role_markers:
+		if marker in s:
+			parts = s.split(marker)
+			if len(parts) >= 2:
+				s = parts[-1].strip()
+	# Normalize common connectors to a delimiter
+	connectors = [
+		"तर्फे", "आणि", "व", "and", "&", "च्या वतीने", "च्या तर्फे", ",", "、", ";", "|", "ः"
+	]
+	for c in connectors:
+		s = s.replace(c, "|")
+	# Words that are not part of person names (org/legal words)
+	stop_single = {
+		"चे", "चा", "ची", "च्या", "तर्फे", "मुखत्यार", "प्रा", "लि", "ली", "प्रा.", "लि.", "कंपनी",
+		"लिमिटेड", "अँड", "एंड", "बिल्डर्स", "डेव्हलपर्स", "डेव्हलपर", "प्रा.लि.", "प्रा. लि."
+	}
+	names: list[str] = []
+	for chunk in [p.strip(" -:|,.") for p in s.split("|")]:
+		if not chunk:
+			continue
+		# Remove org words inside chunk
+		tokens = [t for t in re.split(r"\s+", chunk) if t and (t not in stop_single)]
+		# Heuristic: keep sequences of 2-4 tokens, prefer Devanagari words
+		if not tokens:
+			continue
+		# If the chunk still has many tokens, try to carve out personal-looking subspans
+		def is_deva(w: str) -> bool:
+			return bool(re.search(r"[\u0900-\u097F]", w))
+		# Group consecutive tokens by script
+		current: list[str] = []
+		current_is_deva = None
+		def flush_current():
+			nonlocal current, current_is_deva
+			if current:
+				if len(current) >= 1:
+					name = " ".join(current).strip()
+					if name and 1 <= len(name) <= 60:
+						names.append(name)
+			current = []
+			current_is_deva = None
+		for tok in tokens:
+			is_d = is_deva(tok)
+			if current_is_deva is None or current_is_deva == is_d:
+				current.append(tok)
+				current_is_deva = is_d
+			else:
+				flush_current()
+				current.append(tok)
+				current_is_deva = is_d
+		flush_current()
+	# Post-filter: keep only plausible personal names (2-4 words or single strong token)
+	cleaned: list[str] = []
+	for n in names:
+		words = [w for w in n.split() if w not in stop_single]
+		if not words:
+			continue
+		if 2 <= len(words) <= 4:
+			cleaned.append(" ".join(words))
+		elif len(words) == 1:
+			# Accept single-word if clearly Devanagari and not an org word
+			if re.search(r"[\u0900-\u097F]", words[0]):
+				cleaned.append(words[0])
+	# Deduplicate and preserve order
+	seen = set()
+	out: list[str] = []
+	for n in cleaned:
+		if n not in seen:
+			seen.add(n)
+			out.append(n)
+	return out
 
 
 @app.get("/export_pdf")

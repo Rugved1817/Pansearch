@@ -628,9 +628,9 @@
 			<div id="loading" class="skeleton" style="display:none;"></div>
 			<table id="table" style="display:none;"></table>
 			<div class="pagination" id="pager" style="display:none;">
-				<button class="btn" id="prev">Prev</button>
+				<button class="btn btn-secondary" id="prev">Prev</button>
 				<span id="pageInfo" class="stat">Page-1 / 1</span>
-				<button class="btn" id="next">Next</button>
+				<button class="btn btn-secondary" id="next">Next</button>
 			</div>
 		</div>
 	</div>
@@ -826,7 +826,7 @@
 					const ext = await fetch(`${API_BASE}/pan_meta?` + new URLSearchParams({ pan }));
 					if (ext.ok) {
 						const ej = await ext.json().catch(()=>({}));
-						metaName = (ej.extracted_name ?? ej.name) ?? null;
+						metaName = (Array.isArray(ej?.names) && ej.names.length ? ej.names.join('<br><br>') : (ej.extracted_name ?? ej.name)) ?? null;
 						metaAge = ej.age ?? null;
 						if (typeof metaName !== 'string') metaName = metaName != null ? String(metaName) : null;
 						if (typeof metaAge !== 'number') {
@@ -843,11 +843,20 @@
 						const ex = el('extracted');
 						if (metaName) {
 							ex.style.display = 'inline-block';
+							const hasNamesList = Array.isArray(ej?.names) && ej.names.length > 0;
 							const isExtracted = ej && typeof ej.extracted_name === 'string' && ej.extracted_name.length > 0;
-							ex.textContent = `${isExtracted ? 'Extracted Name' : 'Name'}: ${metaName}`;
+							if (hasNamesList) {
+								// Display names on separate lines
+								const label = 'Names:';
+								const namesHtml = ej.names.map(name => name.trim()).filter(n => n).join('<br><br>');
+								ex.innerHTML = `${label}<br>${namesHtml}`;
+							} else {
+								ex.textContent = `${isExtracted ? 'Extracted Name' : 'Name'}: ${metaName}`;
+							}
 						} else {
 							ex.style.display = 'none';
 							ex.textContent = '';
+							ex.innerHTML = '';
 						}
 					}
 				} catch (e) {
@@ -910,7 +919,7 @@
 					if (ext.ok) {
 						const ej = await ext.json().catch(()=>({}));
 						// Expect normalized keys from proxy
-						metaName = (ej.extracted_name ?? ej.name) ?? null;
+						metaName = (Array.isArray(ej?.names) && ej.names.length ? ej.names.join('<br><br>') : (ej.extracted_name ?? ej.name)) ?? null;
 						metaAge = ej.age ?? null;
 						// Normalize to primitives
 						if (typeof metaName !== 'string') metaName = metaName != null ? String(metaName) : null;
@@ -954,11 +963,20 @@
 							const ex = el('extracted');
 							if (metaName) {
 								ex.style.display = 'inline-block';
+								const hasNamesList = Array.isArray(ej?.names) && ej.names.length > 0;
 								const isExtracted = ej && typeof ej.extracted_name === 'string' && ej.extracted_name.length > 0;
-								ex.textContent = `${isExtracted ? 'Extracted Name' : 'Name'}: ${metaName}`;
+								if (hasNamesList) {
+									// Display names on separate lines
+									const label = 'Names:';
+									const namesHtml = ej.names.map(name => name.trim()).filter(n => n).join('<br><br>');
+									ex.innerHTML = `${label}<br>${namesHtml}`;
+								} else {
+									ex.textContent = `${isExtracted ? 'Extracted Name' : 'Name'}: ${metaName}`;
+								}
 							} else {
 								ex.style.display = 'none';
 								ex.textContent = '';
+								ex.innerHTML = '';
 							}
 					} else {
 						// Non-fatal if metadata API fails
@@ -974,7 +992,7 @@
 				{ header: 'Buyer', key: 'buyer' },
 				{ header: 'Seller', key: 'seller' },
 				{ header: 'Name', key: 'Name' },
-				{ header: 'Current Age', key: 'Age' },
+				{ header: 'Age', key: 'Age' },
 				{ header: 'Property Type', key: 'property_type' },
 			];
 			state.colsDisplay = desired.map(d => d.header);
@@ -1141,44 +1159,123 @@
 	}
 
 	async function exportPDF(){
-		// Get current search parameters
-		const pan = el('pan').value.trim();
-		const seed = el('seed').value.trim();
-		if (!pan && !seed) {
-			showToast('Enter PAN or Name to export PDF');
+		// Check if html2canvas is available
+		if (typeof html2canvas === 'undefined') {
+			showToast('PDF library not loaded');
 			return;
 		}
 		
-		// Get current threshold
-		const threshold = state.threshold || 0.75;
+		// Check if jsPDF is available
+		if (typeof window.jspdf === 'undefined') {
+			showToast('PDF library not loaded');
+			return;
+		}
 		
-		// Build query string
-		const qs = new URLSearchParams();
-		if (pan) qs.set('pan', pan);
-		if (seed) qs.set('seed_name', seed);
-		qs.set('limit', '5000');
-		qs.set('threshold', String(threshold));
+		// Check if table has data
+		const table = el('table');
+		if (!table || table.style.display === 'none' || !state.rows.length) {
+			showToast('No table data to export');
+			return;
+		}
 		
-		showToast('Generating PDF...');
+		showToast('Capturing table and generating PDF...');
 		
 		try {
-			const res = await fetch(`${API_BASE}/export_pdf?${qs.toString()}`);
-			if (!res.ok) {
-				const errorText = await res.text();
-				throw new Error(errorText || 'PDF generation failed');
+			const { jsPDF } = window.jspdf;
+			
+			// Get the table wrapper element (contains table and pagination)
+			const tableWrap = el('tableWrap');
+			if (!tableWrap) {
+				showToast('Could not find table to export');
+				return;
 			}
 			
-			// Get PDF blob
-			const blob = await res.blob();
-			const url = URL.createObjectURL(blob);
-			const a = document.createElement('a');
-			a.href = url;
-			a.download = `transaction_report_${new Date().toISOString().split('T')[0]}.pdf`;
-			document.body.appendChild(a);
-			a.click();
-			document.body.removeChild(a);
-			URL.revokeObjectURL(url);
-			showToast('PDF exported successfully');
+			// Capture only the table wrapper as canvas
+			const canvas = await html2canvas(tableWrap, {
+				scale: 2, // Higher quality
+				useCORS: true,
+				letterRendering: true,
+				backgroundColor: '#0c1219', // Match the table-wrap background
+				windowWidth: tableWrap.scrollWidth,
+				windowHeight: tableWrap.scrollHeight,
+				scrollX: 0,
+				scrollY: 0,
+				allowTaint: false,
+				logging: false
+			});
+			
+			// Get image dimensions
+			const imgWidth = canvas.width;
+			const imgHeight = canvas.height;
+			
+			// A4 dimensions in mm
+			const pdfWidth = 210; // A4 width in mm
+			const pdfHeight = 297; // A4 height in mm
+			
+			// Calculate scaling to fit width (maintain aspect ratio)
+			// Use full width of PDF page with margins
+			const margin = 5; // 5mm margin on each side
+			const usableWidth = pdfWidth - (2 * margin);
+			const usableHeight = pdfHeight - (2 * margin);
+			
+			const imgAspectRatio = imgHeight / imgWidth;
+			const usableAspectRatio = usableHeight / usableWidth;
+			
+			let finalWidth, finalHeight;
+			if (imgAspectRatio > usableAspectRatio) {
+				// Image is taller - fit to height
+				finalHeight = usableHeight;
+				finalWidth = usableHeight / imgAspectRatio;
+			} else {
+				// Image is wider - fit to width
+				finalWidth = usableWidth;
+				finalHeight = usableWidth * imgAspectRatio;
+			}
+			
+			// Create PDF
+			const doc = new jsPDF('p', 'mm', 'a4');
+			
+			// Calculate how many pages we need
+			const pagesNeeded = Math.ceil(finalHeight / usableHeight);
+			
+			// Add image across multiple pages if needed
+			for (let page = 0; page < pagesNeeded; page++) {
+				if (page > 0) {
+					doc.addPage();
+				}
+				
+				// Calculate the portion of image for this page
+				const sourceY = (page * usableHeight / finalHeight) * imgHeight;
+				const remainingHeight = imgHeight - sourceY;
+				const sourceHeight = Math.min(usableHeight / finalHeight * imgHeight, remainingHeight);
+				
+				// Calculate destination dimensions for this page
+				const destHeight = Math.min(usableHeight, finalHeight - (page * usableHeight));
+				
+				// Center the image horizontally
+				const destX = margin + (usableWidth - finalWidth) / 2;
+				const destY = margin;
+				
+				// Create a temporary canvas for this page's portion
+				const pageCanvas = document.createElement('canvas');
+				pageCanvas.width = imgWidth;
+				pageCanvas.height = sourceHeight;
+				const ctx = pageCanvas.getContext('2d');
+				
+				// Draw the portion of the original canvas
+				ctx.drawImage(canvas, 0, sourceY, imgWidth, sourceHeight, 0, 0, imgWidth, sourceHeight);
+				
+				// Convert to image
+				const pageImgData = pageCanvas.toDataURL('image/png', 1.0);
+				
+				// Add to PDF
+				doc.addImage(pageImgData, 'PNG', destX, destY, finalWidth, destHeight);
+			}
+			
+			// Save the PDF
+			const fileName = `transaction_table_${new Date().toISOString().split('T')[0]}.pdf`;
+			doc.save(fileName);
+			showToast('Table PDF exported successfully');
 		} catch(e) {
 			console.error('PDF export error:', e);
 			showToast('PDF export failed: ' + (e.message || 'Unknown error'));
@@ -1634,6 +1731,8 @@ if (addToCartBtn) {
 	el('pageSize').onchange = (e)=>{ state.pageSize = parseInt(e.target.value, 10) || 100; state.page = 1; render(); };
 	const thresholdEl = el('threshold');
 	const thresholdValue = el('thresholdValue');
+	// Initialize button ripple effects once handlers exist in DOM
+	initButtonRipples();
 	thresholdEl.oninput = (e)=>{
 		const v = parseInt(e.target.value, 10);
 		thresholdValue.textContent = String(v);
