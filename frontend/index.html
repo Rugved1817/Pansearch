@@ -194,14 +194,146 @@
 			if (!res.ok) throw new Error(await res.text());
 			const json = await res.json();
 			const chips = el('chips'); chips.innerHTML = '';
-			const makeChip = (text) => { const b = document.createElement('button'); b.className='btn'; b.style.padding='6px 10px'; b.textContent = text; b.onclick=()=>{ el('seed').value = text; }; return b; };
+			const makeChip = (text) => { const b = document.createElement('button'); b.className='btn'; b.style.padding='6px 10px'; b.textContent = text; b.onclick=()=>{ el('seed').value = text; fetchSearch(); }; return b; };
 			const eng = Array.from(json.variations?.english || []).slice(0, 12);
 			const dev = Array.from(json.variations?.marathi || []).slice(0, 12);
 			for (const v of eng) chips.appendChild(makeChip(v));
 			for (const v of dev) chips.appendChild(makeChip(v));
 			showToast('Phonetic suggestions updated');
+			
+			// Automatically search with all variations
+			await searchWithVariations(seed, json.variations);
 		} catch(e){ console.error(e); showToast('Phonetics failed'); }
 		finally { btn.disabled = false; btn.classList.remove('loading'); }
+	}
+
+	async function searchWithVariations(originalSeed, variations){
+		if (!variations || (!variations.english?.size && !variations.marathi?.size)){
+			// If no variations, just search with original
+			await fetchSearch();
+			return;
+		}
+		
+		// Collect all variations including original
+		const allVariations = new Set([originalSeed]);
+		if (variations.english) {
+			for (const v of variations.english) allVariations.add(v);
+		}
+		if (variations.marathi) {
+			for (const v of variations.marathi) allVariations.add(v);
+		}
+		
+		setStatus('Searching with variations…'); 
+		setLoading(true);
+		
+		try {
+			// Search with each variation and combine results
+			const allResults = [];
+			const seenKeys = new Set(); // For deduplication
+			
+			// Function to create a unique key for a row
+			const getRowKey = (row) => {
+				// Use PAN + buyer + seller as unique identifier
+				const pan = (row.pan_numbers || '').trim();
+				const buyer = (row.buyer || '').trim().substring(0, 50);
+				const seller = (row.seller || '').trim().substring(0, 50);
+				return `${pan}|${buyer}|${seller}`;
+			};
+			
+			// Search with all variations in parallel for better performance
+			const searchPromises = Array.from(allVariations)
+				.filter(v => v && v.trim())
+				.map(async (variation) => {
+					try {
+						const qs = new URLSearchParams();
+						qs.set('seed_name', variation);
+						qs.set('limit', '5000');
+						
+						const res = await fetch(`${API_BASE}/search?${qs.toString()}`);
+						if (!res.ok) return [];
+						
+						const json = await res.json();
+						return json.data || [];
+					} catch(e) {
+						console.warn(`Search failed for variation "${variation}":`, e);
+						return [];
+					}
+				});
+			
+			// Wait for all searches to complete
+			const allSearchResults = await Promise.all(searchPromises);
+			
+			// Combine and deduplicate results
+			for (const rows of allSearchResults) {
+				for (const row of rows) {
+					const key = getRowKey(row);
+					if (!seenKeys.has(key)) {
+						seenKeys.add(key);
+						allResults.push(row);
+					}
+				}
+			}
+			
+			// If PAN was provided, fetch metadata
+			const pan = el('pan').value.trim();
+			let metaName = null, metaAge = null;
+			if (pan) {
+				try {
+					const ext = await fetch(`${API_BASE}/pan_meta?` + new URLSearchParams({ pan }));
+					if (ext.ok) {
+						const ej = await ext.json().catch(()=>({}));
+						metaName = (ej.extracted_name ?? ej.name) ?? null;
+						metaAge = ej.age ?? null;
+						if (typeof metaName !== 'string') metaName = metaName != null ? String(metaName) : null;
+						if (typeof metaAge !== 'number') {
+							const parsed = ej && (ej.age ?? ej.Age);
+							const n = Number(parsed);
+							metaAge = Number.isFinite(n) ? n : (parsed != null ? String(parsed) : null);
+						}
+						if (metaName != null || metaAge != null) {
+							for (const r of allResults) { 
+								r["Name"] = metaName ?? ''; 
+								r["Age"] = metaAge ?? ''; 
+							}
+						}
+						const ex = el('extracted');
+						if (metaName) {
+							ex.style.display = 'inline-block';
+							const isExtracted = ej && typeof ej.extracted_name === 'string' && ej.extracted_name.length > 0;
+							ex.textContent = `${isExtracted ? 'Extracted Name' : 'Name'}: ${metaName}`;
+						} else {
+							ex.style.display = 'none';
+							ex.textContent = '';
+						}
+					}
+				} catch (e) {
+					console.warn('Meta API error', e);
+				}
+			}
+			
+			// Update state with combined results
+			state.allRows = allResults;
+			const desired = [
+				{ header: 'PAN', key: 'pan_numbers' },
+				{ header: 'Buyer', key: 'buyer' },
+				{ header: 'Seller', key: 'seller' },
+				{ header: 'Name', key: 'Name' },
+				{ header: 'Age', key: 'Age' },
+			];
+			state.colsDisplay = desired.map(d => d.header);
+			state.colMap = Object.fromEntries(desired.map(d => [d.header, d.key]));
+			state.page = 1;
+			applyThreshold();
+			render();
+			setStatus(`Found ${state.rows.length.toLocaleString()} unique rows from ${allVariations.size} variations (threshold ${Math.round(state.threshold*100)})`);
+			showToast(`Found ${allResults.length} unique results`);
+		} catch(e) {
+			console.error(e);
+			setStatus('Error');
+			showToast('Search with variations failed');
+		} finally { 
+			setLoading(false); 
+		}
 	}
 
 	async function fetchSearch(){
