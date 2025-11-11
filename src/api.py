@@ -14,7 +14,7 @@ from indic_transliteration.sanscript import transliterate
 import regex
 
 import duckdb
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from reportlab.lib import colors
@@ -1296,28 +1296,35 @@ def _add_page_header_footer(canvas, doc, logo_path=None, footer_path=None):
 	canvas.restoreState()
 
 
-@app.get("/export_pdf")
+@app.post("/export_pdf")
 def export_pdf(
+	payload: dict = Body(default=None),
 	pan: Optional[str] = Query(default=None),
 	seed_name: Optional[str] = Query(default=None),
 	limit: Optional[int] = Query(default=1000),
 	threshold: Optional[float] = Query(default=0.75),
 ) -> Response:
 	"""Export search results as PDF with Devanagari support."""
-	if not pan and not seed_name:
-		raise HTTPException(status_code=400, detail="Provide either pan or seed_name")
+	if not payload and not pan and not seed_name:
+		raise HTTPException(status_code=400, detail="Provide cart payload or query parameters")
 	if not os.path.exists(DB_PATH):
 		raise HTTPException(status_code=500, detail=f"DB not found at {DB_PATH}")
 	
 	con = duckdb.connect(DB_PATH, read_only=True)
 	try:
-		if pan:
-			rows = _search_by_pan(con, pan)
+		if payload:
+			rows = payload.get("rows") or []
+			cols = list({key for row in rows for key in row.keys()})
+		elif pan or seed_name:
+			if pan:
+				rows = _search_by_pan(con, pan)
+			else:
+				rows = _search_by_seed_name(con, seed_name or "")
+			
+			rows = rows[: (limit or len(rows))]
+			cols = [r[1] for r in con.execute("PRAGMA table_info('transactions')").fetchall()]
 		else:
-			rows = _search_by_seed_name(con, seed_name or "")
-		
-		rows = rows[: (limit or len(rows))]
-		cols = [r[1] for r in con.execute("PRAGMA table_info('transactions')").fetchall()]
+			raise HTTPException(status_code=400, detail="Provide cart payload or query parameters")
 		
 		# Prepare data similar to /search endpoint
 		idx_name = cols.index("name_norm") if "name_norm" in cols else -1
@@ -1325,36 +1332,44 @@ def export_pdf(
 		idx_year = cols.index("year") if "year" in cols else -1
 		
 		base_names: list[str] = []
-		if pan:
-			try:
-				base_rows = _fetch_rows_for_pan(con, pan)
-				base_names = _pick_canonical_names([(r[0],) for r in base_rows])
-			except Exception:
-				base_names = []
-		elif seed_name:
-			base_names = [nlp.normalize_name(seed_name or "")]
-		
-		pan_up = nlp.canonicalize_pan(pan) if pan else None
-		
-		data = []
-		for row in rows:
-			score = 0.0
-			if pan and idx_pan >= 0 and row[idx_pan] and pan_up and row[idx_pan] == pan_up:
-				score = 1.0
-			if score < 1.0 and idx_name >= 0 and row[idx_name] and base_names:
-				best = max((nlp.fuzzy_name_score(row[idx_name], b) for b in base_names), default=0)
-				score = max(score, best / 100.0)
+		pan_up = None
+		data: list[dict] = []
+
+		if payload and rows:
+			for row in rows:
+				item = dict(row)
+				item["match_score"] = round(float(item.get("match_score", 1.0)), 3)
+				data.append(item)
+		else:
+			if pan:
+				try:
+					base_rows = _fetch_rows_for_pan(con, pan)
+					base_names = _pick_canonical_names([(r[0],) for r in base_rows])
+				except Exception:
+					base_names = []
+			elif seed_name:
+				base_names = [nlp.normalize_name(seed_name or "")]
 			
-			if score < threshold:
-				continue
+			pan_up = nlp.canonicalize_pan(pan) if pan else None
 			
-			item = dict(zip(cols, row))
-			item.pop("pan_upper", None)
-			item.pop("pan_raw", None)
-			if idx_year >= 0 and idx_year < len(row):
-				item["year"] = row[idx_year]
-			item["match_score"] = round(float(score), 3)
-			data.append(item)
+			for row in rows:
+				score = 0.0
+				if pan and idx_pan >= 0 and row[idx_pan] and pan_up and row[idx_pan] == pan_up:
+					score = 1.0
+				if score < 1.0 and idx_name >= 0 and row[idx_name] and base_names:
+					best = max((nlp.fuzzy_name_score(row[idx_name], b) for b in base_names), default=0)
+					score = max(score, best / 100.0)
+				
+				if score < threshold:
+					continue
+				
+				item = dict(zip(cols, row))
+				item.pop("pan_upper", None)
+				item.pop("pan_raw", None)
+				if idx_year >= 0 and idx_year < len(row):
+					item["year"] = row[idx_year]
+				item["match_score"] = round(float(score), 3)
+				data.append(item)
 		
 		# If PAN provided, fetch metadata
 		if pan:
@@ -1460,23 +1475,40 @@ def export_pdf(
 			row["property_type"] = property_type
 		
 		# Define columns for PDF
-		desired = [
-			{"header": "PAN", "key": "pan_numbers"},
-			{"header": "Buyer", "key": "buyer"},
-			{"header": "Seller", "key": "seller"},
-			{"header": "Name", "key": "Name"},
-			{"header": "Current Age", "key": "Age"},
-			{"header": "Property Type", "key": "property_type"},
-		]
-		cols_display = [d["header"] for d in desired]
-		col_map = {d["header"]: d["key"] for d in desired}
+		if payload and rows:
+			custom_cols = payload.get("cols")
+			if custom_cols and isinstance(custom_cols, list):
+				cols_display = custom_cols
+				col_map = {c: c for c in cols_display}
+			else:
+				default = [
+					{"header": "PAN", "key": "pan_numbers"},
+					{"header": "Buyer", "key": "buyer"},
+					{"header": "Seller", "key": "seller"},
+					{"header": "Name", "key": "Name"},
+					{"header": "Current Age", "key": "Age"},
+					{"header": "Property Type", "key": "property_type"},
+				]
+				cols_display = [d["header"] for d in default]
+				col_map = {d["header"]: d["key"] for d in default}
+		else:
+			desired = [
+				{"header": "PAN", "key": "pan_numbers"},
+				{"header": "Buyer", "key": "buyer"},
+				{"header": "Seller", "key": "seller"},
+				{"header": "Name", "key": "Name"},
+				{"header": "Current Age", "key": "Age"},
+				{"header": "Property Type", "key": "property_type"},
+			]
+			cols_display = [d["header"] for d in desired]
+			col_map = {d["header"]: d["key"] for d in desired}
 		
 		if not data:
 			raise HTTPException(status_code=400, detail="No data found matching the search criteria and threshold")
 		
 		# Generate PDF - pass the searched PAN if available
 		try:
-			searched_pan = pan_up if pan else None
+			searched_pan = pan_up if pan else payload.get("search_pan") if payload else None
 			pdf_buffer = _generate_pdf(data, cols_display, col_map, search_pan=searched_pan)
 		except Exception as e:
 			logger.exception("PDF generation failed: %s", e)

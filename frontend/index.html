@@ -620,8 +620,6 @@
 					<button id="btnClearSelection" class="btn btn-ghost" title="Clear all selected rows">Clear</button>
 					<button id="btnAddToCart" class="btn btn-primary" title="Move selected rows into cart" disabled>Add to Cart</button>
 					<button id="btnCart" class="btn" title="View cart items">Cart (0)</button>
-					<button id="btnExport" class="btn" title="Export current results as CSV">Export CSV</button>
-					<button id="btnExportPDF" class="btn" title="Export current results as PDF">Export PDF</button>
 				</div>
 			</div>
 		</div>
@@ -1629,8 +1627,6 @@ if (addToCartBtn) {
 		}
 	};
 }
-	el('btnExport').onclick = exportCSV;
-	el('btnExportPDF').onclick = exportPDF;
 	el('prev').onclick = ()=>{ if (state.page>1){ state.page--; render(); }};
 	el('next').onclick = ()=>{ const pages = Math.max(1, Math.ceil(state.rows.length / state.pageSize)); if (state.page<pages){ state.page++; render(); }};
 	el('pageSize').onchange = (e)=>{ state.pageSize = parseInt(e.target.value, 10) || 100; state.page = 1; render(); };

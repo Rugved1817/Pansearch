@@ -202,6 +202,8 @@
 		<div class="card">
 			<div class="cart-controls">
 				<span id="cartStatus" style="color: var(--muted); font-size: 14px;">Loading…</span>
+				<button id="btnExportCSV" class="btn">Export CSV</button>
+				<button id="btnExportPDF" class="btn">Export PDF</button>
 				<button id="btnClearCart" class="btn btn-danger">Clear Cart</button>
 			</div>
 			<div id="cartContent"></div>
@@ -212,6 +214,7 @@
 
 	<script>
 	const CART_STORAGE_KEY = 'pansearch_cart_v1';
+	const API_BASE = (location.protocol === 'file:') ? 'http://localhost:8000' : `${location.protocol}//${location.hostname || 'localhost'}:8000`;
 
 	const el = id => document.getElementById(id);
 
@@ -252,6 +255,64 @@
 		}
 		return '';
 	};
+
+const exportCartCSV = () => {
+	const cart = loadCart();
+	if (!cart.size) {
+		showToast('Cart is empty');
+		return;
+	}
+	const headers = ['PAN', 'Buyer', 'Seller', 'Doc No', 'Year'];
+	const rows = [headers.join(',')];
+	for (const [, row] of cart.entries()) {
+		const values = [
+			formatField(row, ['pan_numbers', 'PAN', 'pan']),
+			formatField(row, ['buyer', 'Buyer']).replace(/,/g, ';'),
+			formatField(row, ['seller', 'Seller']).replace(/,/g, ';'),
+			formatField(row, ['DocNo', 'doc_no', 'docno', 'DocumentNo']),
+			formatField(row, ['year', 'Year', 'YEAR'])
+		];
+		rows.push(values.map(val => {
+			const v = val ?? '';
+			return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+		}).join(','));
+	}
+	const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+	const url = URL.createObjectURL(blob);
+	const a = document.createElement('a');
+	a.href = url;
+	a.download = `cart_${new Date().toISOString().split('T')[0]}.csv`;
+	a.click();
+	URL.revokeObjectURL(url);
+	showToast('CSV exported');
+};
+
+const exportCartPDF = async () => {
+	const cart = loadCart();
+	if (!cart.size) {
+		showToast('Cart is empty');
+		return;
+	}
+	try {
+		const res = await fetch(`${API_BASE}/export_pdf`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ rows: Array.from(cart.values()), search_pan: null })
+		});
+		if (!res.ok) throw new Error(await res.text());
+		const blob = await res.blob();
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = `cart_report_${new Date().toISOString().split('T')[0]}.pdf`;
+		a.click();
+		URL.revokeObjectURL(url);
+		showToast('PDF exported');
+	} catch (err) {
+		console.error(err);
+		showToast('PDF export failed');
+	}
+};
 
 	const renderCart = () => {
 		const content = el('cartContent');
@@ -328,6 +389,8 @@
 	};
 
 	renderCart();
+	el('btnExportCSV').onclick = exportCartCSV;
+	el('btnExportPDF').onclick = exportCartPDF;
 	</script>
 </body>
 </html>
