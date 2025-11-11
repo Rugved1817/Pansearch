@@ -22,6 +22,12 @@
 			--focus-ring: rgba(155,140,255,0.35);
 			--shadow-1: 0 10px 30px rgba(0,0,0,.35);
 			--shadow-2: 0 1px 0 rgba(255,255,255,0.03) inset;
+			--btn-primary-1: #203046;
+			--btn-primary-2: #162433;
+			--btn-accent-1: #283a55;
+			--btn-accent-2: #1e2c42;
+			--glow-primary: 0 8px 24px rgba(96,213,255,0.22), 0 0 0 1px rgba(96,213,255,0.12) inset;
+			--glow-accent: 0 8px 24px rgba(155,140,255,0.18), 0 0 0 1px rgba(155,140,255,0.10) inset;
 		}
 		* { box-sizing: border-box; }
 		html, body { height: 100%; }
@@ -34,7 +40,7 @@
 		.container { max-width: 1220px; margin: 0 auto; padding: 28px; }
 		h1 { font-size: 26px; margin: 0 0 14px; letter-spacing: 0.2px; color: #e7eef6; font-weight: 700; }
 		.header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
-		.badge { background: linear-gradient(135deg, #131b28, #0f1723); padding: 6px 12px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: 12px; backdrop-filter: saturate(120%) blur(6px); }
+		.badge { background: linear-gradient(135deg, #111827, #0e1623); padding: 6px 12px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: 12px; backdrop-filter: saturate(120%) blur(6px); box-shadow: 0 6px 18px rgba(0,0,0,.35), 0 0 0 1px rgba(255,255,255,0.03) inset; }
 
 		mark { background: rgba(255, 235, 59, 0.25); color: #fff; padding: 0 .18em; border-radius: 3px; box-shadow: 0 0 0 1px rgba(255, 235, 59, 0.25) inset; }
 
@@ -45,17 +51,70 @@
 		.col-6 { grid-column: span 6; }
 		.col-8 { grid-column: span 8; }
 
-		.input { width: 100%; background: #0b1118; border: 1px solid var(--border); color: var(--text); padding: 12px 12px; border-radius: 12px; outline: none; transition: border-color .2s, box-shadow .2s, background .2s; font-size: 14px; box-shadow: var(--shadow-2); }
+		.input { width: 100%; background: #0b1118; border: 1px solid var(--border); color: var(--text); padding: 12px 12px; border-radius: 12px; outline: none; transition: border-color .2s, box-shadow .2s, background .2s, transform .08s ease; font-size: 14px; box-shadow: var(--shadow-2); }
 		.input::placeholder { color: #6f8194; }
-		.input:hover { background: #0c131b; }
-		.input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-ring), 0 0 0 1px rgba(255,255,255,0.04) inset; }
+		.input:hover { background: #0c131b; transform: translateY(-1px); }
+		.input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-ring), 0 0 0 1px rgba(255,255,255,0.04) inset; transform: translateY(-1px); }
 		.label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
-		.btn { background: linear-gradient(135deg, #253246, #1b2533); color: #e8f3ff; border: 1px solid var(--border); padding: 10px 14px; border-radius: 12px; cursor: pointer; font-weight: 600; letter-spacing: .2px; transition: transform .08s ease, filter .18s ease, box-shadow .18s ease; box-shadow: var(--shadow-2); }
-		.btn:hover { filter: brightness(1.08); box-shadow: 0 6px 16px rgba(0,0,0,.35), var(--shadow-2); }
-		.btn:active { transform: translateY(1px); }
+		/* Button animations */
+		@keyframes gradientShift {
+			0% { background-position: 0% 50%; }
+			50% { background-position: 100% 50%; }
+			100% { background-position: 0% 50%; }
+		}
+
+		.btn { 
+			position: relative;
+			overflow: hidden;
+			background: linear-gradient(135deg, var(--btn-primary-1), var(--btn-primary-2));
+			background-size: 200% 200%;
+			color: #e8f3ff; 
+			border: 1px solid var(--border); 
+			padding: 10px 14px; 
+			border-radius: 12px; 
+			cursor: pointer; 
+			font-weight: 600; 
+			letter-spacing: .2px; 
+			transition: transform .10s ease, filter .22s ease, box-shadow .22s ease, background-position .6s ease;
+			box-shadow: var(--shadow-2);
+			will-change: transform, box-shadow, background-position, filter;
+		}
+		.btn:hover { 
+			filter: brightness(1.06) saturate(1.02);
+			box-shadow: 0 8px 22px rgba(0,0,0,.40), var(--shadow-2), 0 0 0 1px rgba(255,255,255,0.04) inset;
+			background-position: 100% 50%;
+			transform: translateY(-1px);
+		}
+		.btn:active { transform: translateY(0); filter: brightness(1.0); }
 		.btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--focus-ring), var(--shadow-2); }
-		.btn-primary { background: linear-gradient(135deg, #2a3c52, #1f2e43); border-color: #2a3a4e; }
+
+		/* Variant: Primary */
+		.btn-primary { 
+			background: linear-gradient(135deg, var(--btn-accent-1), var(--btn-accent-2)); 
+			border-color: #2a3a4e; 
+			box-shadow: var(--shadow-2), var(--glow-primary);
+			animation: gradientShift 6s ease infinite;
+		}
+		.btn-primary:hover { 
+			box-shadow: var(--shadow-2), 0 10px 28px rgba(96,213,255,0.28), 0 0 0 1px rgba(96,213,255,0.16) inset; 
+		}
+
+		/* Variant: Secondary (for pagination and neutral actions) */
+		.btn-secondary { 
+			background: linear-gradient(135deg, #1b2230, #121a26); 
+			border-color: #223148; 
+			box-shadow: var(--shadow-2), 0 8px 24px rgba(155,140,255,0.18), 0 0 0 1px rgba(155,140,255,0.10) inset;
+		}
+		.btn-secondary:hover { 
+			box-shadow: var(--shadow-2), 0 10px 26px rgba(155,140,255,0.22), 0 0 0 1px rgba(155,140,255,0.14) inset; 
+			transform: translateY(-1px);
+		}
+
+		/* Variant: Ghost */
 		.btn-ghost { background: transparent; }
+		.btn-ghost:hover { background: linear-gradient(135deg, rgba(37,50,70,0.4), rgba(27,37,51,0.4)); }
+
+		/* Small inline spinner adjusted to new style */
 		.btn[disabled] { opacity: 0.5; cursor: not-allowed; filter: none; }
 		/* Inline loading spinner inside buttons */
 		.btn .spinner { display: none; width: 14px; height: 14px; border: 2px solid #cfe3ff; border-top-color: transparent; border-radius: 50%; margin-left: 8px; animation: spin .8s linear infinite; }
@@ -63,22 +122,57 @@
 		.btn.loading .btn-label { opacity: .85; }
 		@keyframes spin { to { transform: rotate(360deg); } }
 
+		/* Button ripple effect */
+		.btn .ripple {
+			position: absolute;
+			border-radius: 9999px;
+			transform: translate(-50%, -50%);
+			pointer-events: none;
+			width: 8px;
+			height: 8px;
+			background: radial-gradient(circle, rgba(96,213,255,0.45) 0%, rgba(96,213,255,0.25) 45%, rgba(96,213,255,0.00) 70%);
+			animation: rippleExpand .66s ease-out forwards;
+			filter: saturate(120%);
+		}
+		.btn.btn-primary .ripple {
+			background: radial-gradient(circle, rgba(96,213,255,0.50) 0%, rgba(96,213,255,0.28) 45%, rgba(96,213,255,0.00) 70%);
+		}
+		.btn.btn-secondary .ripple {
+			background: radial-gradient(circle, rgba(155,140,255,0.40) 0%, rgba(155,140,255,0.24) 45%, rgba(155,140,255,0.00) 70%);
+		}
+		@keyframes rippleExpand {
+			from { opacity: 1; width: 8px; height: 8px; }
+			to { opacity: 0; width: 240px; height: 240px; }
+		}
 		.toolbar { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
 		.stat { color: var(--muted); font-size: 12px; padding: 6px 10px; background: #0c131b; border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-2); }
 		
 		/* Tag styles with close button */
-		.tag { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; background: linear-gradient(135deg, #253246, #1b2533); color: #e8f3ff; border: 1px solid var(--border); border-radius: 12px; font-size: 13px; font-weight: 500; cursor: pointer; transition: all .18s ease; box-shadow: var(--shadow-2); }
-		.tag:hover { filter: brightness(1.08); box-shadow: 0 4px 12px rgba(0,0,0,.35), var(--shadow-2); }
+		.tag { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; background: linear-gradient(135deg, #1a2636, #121b29); color: #e8f3ff; border: 1px solid var(--border); border-radius: 12px; font-size: 13px; font-weight: 500; cursor: pointer; transition: all .18s ease; box-shadow: var(--shadow-2), 0 8px 20px rgba(0,0,0,.35); }
+		.tag:hover { filter: brightness(1.08); box-shadow: 0 6px 16px rgba(0,0,0,.40), var(--shadow-2); transform: translateY(-1px); }
 		.tag-text { user-select: none; }
-		.tag-close { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; background: rgba(255,255,255,0.15); color: #e8f3ff; font-size: 12px; line-height: 1; cursor: pointer; transition: all .15s ease; margin-left: 2px; }
+		.tag-close { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; background: rgba(255,255,255,0.12); color: #e8f3ff; font-size: 12px; line-height: 1; cursor: pointer; transition: all .15s ease; margin-left: 2px; }
 		.tag-close:hover { background: rgba(255,107,107,0.3); color: #ff6b6b; transform: scale(1.1); }
 		.tag-close:active { transform: scale(0.95); }
 
-		.table-wrap { margin-top: 16px; background: #0c1219; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; overflow-x: auto; box-shadow: var(--shadow-1), var(--shadow-2); }
+		.table-wrap { position: relative; margin-top: 16px; background: linear-gradient(180deg, #0c1219, #0b1118); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; overflow-x: auto; box-shadow: var(--shadow-1), var(--shadow-2); }
+		.table-wrap::before {
+			content: "";
+			position: absolute;
+			inset: 0;
+			border-radius: 14px;
+			pointer-events: none;
+			background: radial-gradient(1200px 400px at 10% -20%, rgba(96,213,255,0.08), transparent 60%),
+			            radial-gradient(1000px 400px at 100% -10%, rgba(155,140,255,0.08), transparent 60%);
+			opacity: 0;
+			transition: opacity .25s ease;
+		}
+		.table-wrap:hover::before { opacity: 1; }
 		table { width: 100%; border-collapse: collapse; table-layout: auto; }
-		thead th { position: sticky; top: 0; background: rgba(16,24,36,0.8); color: #d1deed; font-weight: 600; font-size: 12px; text-align: left; padding: 12px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; backdrop-filter: blur(8px); }
+		thead th { position: sticky; top: 0; background: linear-gradient(180deg, rgba(16,24,36,0.85), rgba(16,24,36,0.7)); color: #d1deed; font-weight: 600; font-size: 12px; text-align: left; padding: 12px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; backdrop-filter: blur(10px) saturate(120%); }
 		tbody tr:nth-child(even) { background: var(--row-alt); }
-		tbody td { padding: 12px 10px; border-bottom: 1px solid #141b25; font-size: 12px; color: #dce7f5; word-wrap: break-word; word-break: break-word; white-space: normal; vertical-align: top; }
+		tbody tr:hover { background: #101a27; }
+		tbody td { padding: 12px 10px; border-bottom: 1px solid #141b25; font-size: 12px; color: #dce7f5; word-wrap: break-word; word-break: break-word; white-space: normal; vertical-align: top; line-height: 1.35; }
 		tbody td:first-child { min-width: 120px; }
 		tbody td:nth-child(2), tbody td:nth-child(3) { min-width: 300px; max-width: 680px; }
 		tbody tr:hover { background: #0f1823; }
@@ -167,9 +261,9 @@
 			<div id="loading" class="skeleton" style="display:none;"></div>
 			<table id="table" style="display:none;"></table>
 			<div class="pagination" id="pager" style="display:none;">
-				<button class="btn" id="prev">Prev</button>
+				<button class="btn btn-secondary" id="prev">Prev</button>
 				<span id="pageInfo" class="stat">Page-1 / 1</span>
-				<button class="btn" id="next">Next</button>
+				<button class="btn btn-secondary" id="next">Next</button>
 			</div>
 		</div>
 	</div>
@@ -187,6 +281,32 @@
 	const API_BASE = (location.protocol === 'file:') ? 'http://localhost:8000' : `${location.protocol}//${location.hostname || 'localhost'}:8000`;
 	const el = id => document.getElementById(id);
 			let state = { allRows: [], rows: [], colsDisplay: [], colMap: {}, page: 1, pageSize: 100, threshold: 0.75 };
+
+	// Attach ripple effect to all buttons with class 'btn'
+	function initButtonRipples(){
+		const addRipple = (btn, evt) => {
+			const rect = btn.getBoundingClientRect();
+			const x = evt.clientX - rect.left;
+			const y = evt.clientY - rect.top;
+			const ripple = document.createElement('span');
+			ripple.className = 'ripple';
+			ripple.style.left = `${x}px`;
+			ripple.style.top = `${y}px`;
+			btn.appendChild(ripple);
+			// Remove after animation completes
+			ripple.addEventListener('animationend', () => ripple.remove());
+		};
+		document.querySelectorAll('.btn').forEach(btn => {
+			// Avoid multiple bindings
+			if (btn._rippleBound) return;
+			btn._rippleBound = true;
+			btn.addEventListener('click', (e) => {
+				// Skip if disabled or loading to avoid clutter
+				if (btn.disabled || btn.classList.contains('loading')) return;
+				addRipple(btn, e);
+			});
+		});
+	}
 
 	function showToast(msg){ const t = el('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'), 2200); }
 	function setStatus(msg){ el('stat').textContent = msg; }
@@ -311,7 +431,7 @@
 					const ext = await fetch(`${API_BASE}/pan_meta?` + new URLSearchParams({ pan }));
 					if (ext.ok) {
 						const ej = await ext.json().catch(()=>({}));
-						metaName = (ej.extracted_name ?? ej.name) ?? null;
+						metaName = (Array.isArray(ej?.names) && ej.names.length ? ej.names.join('<br><br>') : (ej.extracted_name ?? ej.name)) ?? null;
 						metaAge = ej.age ?? null;
 						if (typeof metaName !== 'string') metaName = metaName != null ? String(metaName) : null;
 						if (typeof metaAge !== 'number') {
@@ -328,11 +448,20 @@
 						const ex = el('extracted');
 						if (metaName) {
 							ex.style.display = 'inline-block';
+							const hasNamesList = Array.isArray(ej?.names) && ej.names.length > 0;
 							const isExtracted = ej && typeof ej.extracted_name === 'string' && ej.extracted_name.length > 0;
-							ex.textContent = `${isExtracted ? 'Extracted Name' : 'Name'}: ${metaName}`;
+							if (hasNamesList) {
+								// Display names on separate lines
+								const label = 'Names:';
+								const namesHtml = ej.names.map(name => name.trim()).filter(n => n).join('<br><br>');
+								ex.innerHTML = `${label}<br>${namesHtml}`;
+							} else {
+								ex.textContent = `${isExtracted ? 'Extracted Name' : 'Name'}: ${metaName}`;
+							}
 						} else {
 							ex.style.display = 'none';
 							ex.textContent = '';
+							ex.innerHTML = '';
 						}
 					}
 				} catch (e) {
@@ -387,7 +516,7 @@
 					if (ext.ok) {
 						const ej = await ext.json().catch(()=>({}));
 						// Expect normalized keys from proxy
-						metaName = (ej.extracted_name ?? ej.name) ?? null;
+						metaName = (Array.isArray(ej?.names) && ej.names.length ? ej.names.join('<br><br>') : (ej.extracted_name ?? ej.name)) ?? null;
 						metaAge = ej.age ?? null;
 						// Normalize to primitives
 						if (typeof metaName !== 'string') metaName = metaName != null ? String(metaName) : null;
@@ -431,11 +560,20 @@
 							const ex = el('extracted');
 							if (metaName) {
 								ex.style.display = 'inline-block';
+								const hasNamesList = Array.isArray(ej?.names) && ej.names.length > 0;
 								const isExtracted = ej && typeof ej.extracted_name === 'string' && ej.extracted_name.length > 0;
-								ex.textContent = `${isExtracted ? 'Extracted Name' : 'Name'}: ${metaName}`;
+								if (hasNamesList) {
+									// Display names on separate lines
+									const label = 'Names:';
+									const namesHtml = ej.names.map(name => name.trim()).filter(n => n).join('<br><br>');
+									ex.innerHTML = `${label}<br>${namesHtml}`;
+								} else {
+									ex.textContent = `${isExtracted ? 'Extracted Name' : 'Name'}: ${metaName}`;
+								}
 							} else {
 								ex.style.display = 'none';
 								ex.textContent = '';
+								ex.innerHTML = '';
 							}
 					} else {
 						// Non-fatal if metadata API fails
@@ -451,7 +589,7 @@
 				{ header: 'Buyer', key: 'buyer' },
 				{ header: 'Seller', key: 'seller' },
 				{ header: 'Name', key: 'Name' },
-				{ header: 'Current Age', key: 'Age' },
+				{ header: 'Age', key: 'Age' },
 				{ header: 'Property Type', key: 'property_type' },
 			];
 			state.colsDisplay = desired.map(d => d.header);
@@ -514,7 +652,20 @@
 							td.textContent = fullText;
 						}
 					} else {
-						td.textContent = (v!==null && v!==undefined) ? String(v) : '';
+						// Render Name column with line breaks if present
+						if (key === 'Name') {
+							const str = (v!==null && v!==undefined) ? String(v) : '';
+							if (str.includes('<br>')) {
+								td.innerHTML = str;
+							} else if (str.includes(', ')) {
+								// Fallback: split comma-separated into lines
+								td.innerHTML = str.split(', ').map(s => s.trim()).filter(Boolean).join('<br><br>');
+							} else {
+								td.textContent = str;
+							}
+						} else {
+							td.textContent = (v!==null && v!==undefined) ? String(v) : '';
+						}
 					}
 					tr.appendChild(td);
 				}
@@ -567,44 +718,123 @@
 	}
 
 	async function exportPDF(){
-		// Get current search parameters
-		const pan = el('pan').value.trim();
-		const seed = el('seed').value.trim();
-		if (!pan && !seed) {
-			showToast('Enter PAN or Name to export PDF');
+		// Check if html2canvas is available
+		if (typeof html2canvas === 'undefined') {
+			showToast('PDF library not loaded');
 			return;
 		}
 		
-		// Get current threshold
-		const threshold = state.threshold || 0.75;
+		// Check if jsPDF is available
+		if (typeof window.jspdf === 'undefined') {
+			showToast('PDF library not loaded');
+			return;
+		}
 		
-		// Build query string
-		const qs = new URLSearchParams();
-		if (pan) qs.set('pan', pan);
-		if (seed) qs.set('seed_name', seed);
-		qs.set('limit', '5000');
-		qs.set('threshold', String(threshold));
+		// Check if table has data
+		const table = el('table');
+		if (!table || table.style.display === 'none' || !state.rows.length) {
+			showToast('No table data to export');
+			return;
+		}
 		
-		showToast('Generating PDF...');
+		showToast('Capturing table and generating PDF...');
 		
 		try {
-			const res = await fetch(`${API_BASE}/export_pdf?${qs.toString()}`);
-			if (!res.ok) {
-				const errorText = await res.text();
-				throw new Error(errorText || 'PDF generation failed');
+			const { jsPDF } = window.jspdf;
+			
+			// Get the table wrapper element (contains table and pagination)
+			const tableWrap = el('tableWrap');
+			if (!tableWrap) {
+				showToast('Could not find table to export');
+				return;
 			}
 			
-			// Get PDF blob
-			const blob = await res.blob();
-			const url = URL.createObjectURL(blob);
-			const a = document.createElement('a');
-			a.href = url;
-			a.download = `transaction_report_${new Date().toISOString().split('T')[0]}.pdf`;
-			document.body.appendChild(a);
-			a.click();
-			document.body.removeChild(a);
-			URL.revokeObjectURL(url);
-			showToast('PDF exported successfully');
+			// Capture only the table wrapper as canvas
+			const canvas = await html2canvas(tableWrap, {
+				scale: 2, // Higher quality
+				useCORS: true,
+				letterRendering: true,
+				backgroundColor: '#0c1219', // Match the table-wrap background
+				windowWidth: tableWrap.scrollWidth,
+				windowHeight: tableWrap.scrollHeight,
+				scrollX: 0,
+				scrollY: 0,
+				allowTaint: false,
+				logging: false
+			});
+			
+			// Get image dimensions
+			const imgWidth = canvas.width;
+			const imgHeight = canvas.height;
+			
+			// A4 dimensions in mm
+			const pdfWidth = 210; // A4 width in mm
+			const pdfHeight = 297; // A4 height in mm
+			
+			// Calculate scaling to fit width (maintain aspect ratio)
+			// Use full width of PDF page with margins
+			const margin = 5; // 5mm margin on each side
+			const usableWidth = pdfWidth - (2 * margin);
+			const usableHeight = pdfHeight - (2 * margin);
+			
+			const imgAspectRatio = imgHeight / imgWidth;
+			const usableAspectRatio = usableHeight / usableWidth;
+			
+			let finalWidth, finalHeight;
+			if (imgAspectRatio > usableAspectRatio) {
+				// Image is taller - fit to height
+				finalHeight = usableHeight;
+				finalWidth = usableHeight / imgAspectRatio;
+			} else {
+				// Image is wider - fit to width
+				finalWidth = usableWidth;
+				finalHeight = usableWidth * imgAspectRatio;
+			}
+			
+			// Create PDF
+			const doc = new jsPDF('p', 'mm', 'a4');
+			
+			// Calculate how many pages we need
+			const pagesNeeded = Math.ceil(finalHeight / usableHeight);
+			
+			// Add image across multiple pages if needed
+			for (let page = 0; page < pagesNeeded; page++) {
+				if (page > 0) {
+					doc.addPage();
+				}
+				
+				// Calculate the portion of image for this page
+				const sourceY = (page * usableHeight / finalHeight) * imgHeight;
+				const remainingHeight = imgHeight - sourceY;
+				const sourceHeight = Math.min(usableHeight / finalHeight * imgHeight, remainingHeight);
+				
+				// Calculate destination dimensions for this page
+				const destHeight = Math.min(usableHeight, finalHeight - (page * usableHeight));
+				
+				// Center the image horizontally
+				const destX = margin + (usableWidth - finalWidth) / 2;
+				const destY = margin;
+				
+				// Create a temporary canvas for this page's portion
+				const pageCanvas = document.createElement('canvas');
+				pageCanvas.width = imgWidth;
+				pageCanvas.height = sourceHeight;
+				const ctx = pageCanvas.getContext('2d');
+				
+				// Draw the portion of the original canvas
+				ctx.drawImage(canvas, 0, sourceY, imgWidth, sourceHeight, 0, 0, imgWidth, sourceHeight);
+				
+				// Convert to image
+				const pageImgData = pageCanvas.toDataURL('image/png', 1.0);
+				
+				// Add to PDF
+				doc.addImage(pageImgData, 'PNG', destX, destY, finalWidth, destHeight);
+			}
+			
+			// Save the PDF
+			const fileName = `transaction_table_${new Date().toISOString().split('T')[0]}.pdf`;
+			doc.save(fileName);
+			showToast('Table PDF exported successfully');
 		} catch(e) {
 			console.error('PDF export error:', e);
 			showToast('PDF export failed: ' + (e.message || 'Unknown error'));
@@ -1015,6 +1245,8 @@
 	el('pageSize').onchange = (e)=>{ state.pageSize = parseInt(e.target.value, 10) || 100; state.page = 1; render(); };
 	const thresholdEl = el('threshold');
 	const thresholdValue = el('thresholdValue');
+	// Initialize button ripple effects once handlers exist in DOM
+	initButtonRipples();
 	thresholdEl.oninput = (e)=>{
 		const v = parseInt(e.target.value, 10);
 		thresholdValue.textContent = String(v);
