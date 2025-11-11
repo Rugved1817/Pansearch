@@ -65,6 +65,14 @@
 
 		.toolbar { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
 		.stat { color: var(--muted); font-size: 12px; padding: 6px 10px; background: #0c131b; border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-2); }
+		
+		/* Tag styles with close button */
+		.tag { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; background: linear-gradient(135deg, #253246, #1b2533); color: #e8f3ff; border: 1px solid var(--border); border-radius: 12px; font-size: 13px; font-weight: 500; cursor: pointer; transition: all .18s ease; box-shadow: var(--shadow-2); }
+		.tag:hover { filter: brightness(1.08); box-shadow: 0 4px 12px rgba(0,0,0,.35), var(--shadow-2); }
+		.tag-text { user-select: none; }
+		.tag-close { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; background: rgba(255,255,255,0.15); color: #e8f3ff; font-size: 12px; line-height: 1; cursor: pointer; transition: all .15s ease; margin-left: 2px; }
+		.tag-close:hover { background: rgba(255,107,107,0.3); color: #ff6b6b; transform: scale(1.1); }
+		.tag-close:active { transform: scale(0.95); }
 
 		.table-wrap { margin-top: 16px; background: #0c1219; border: 1px solid var(--border); border-radius: 14px; overflow: hidden; overflow-x: auto; box-shadow: var(--shadow-1), var(--shadow-2); }
 		table { width: 100%; border-collapse: collapse; table-layout: auto; }
@@ -194,7 +202,28 @@
 			if (!res.ok) throw new Error(await res.text());
 			const json = await res.json();
 			const chips = el('chips'); chips.innerHTML = '';
-			const makeChip = (text) => { const b = document.createElement('button'); b.className='btn'; b.style.padding='6px 10px'; b.textContent = text; b.onclick=()=>{ el('seed').value = text; fetchSearch(); }; return b; };
+			const makeChip = (text) => {
+				const tag = document.createElement('div');
+				tag.className = 'tag';
+				
+				const tagText = document.createElement('span');
+				tagText.className = 'tag-text';
+				tagText.textContent = text;
+				tagText.onclick = () => { el('seed').value = text; fetchSearch(); };
+				
+				const closeBtn = document.createElement('span');
+				closeBtn.className = 'tag-close';
+				closeBtn.textContent = '×';
+				closeBtn.setAttribute('aria-label', 'Remove tag');
+				closeBtn.onclick = (e) => {
+					e.stopPropagation();
+					tag.remove();
+				};
+				
+				tag.appendChild(tagText);
+				tag.appendChild(closeBtn);
+				return tag;
+			};
 			const eng = Array.from(json.variations?.english || []).slice(0, 12);
 			const dev = Array.from(json.variations?.marathi || []).slice(0, 12);
 			for (const v of eng) chips.appendChild(makeChip(v));
