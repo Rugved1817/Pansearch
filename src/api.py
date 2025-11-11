@@ -600,9 +600,19 @@ def _register_devanagari_fonts():
 		"/usr/share/fonts/opentype/noto/NotoSansDevanagari-Regular.ttf",
 		"/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf",
 		"/usr/share/fonts/opentype/noto/NotoSansDevanagari-Bold.ttf",
-		# Windows font locations
+		# Windows font locations - common Devanagari fonts
 		"C:/Windows/Fonts/NotoSansDevanagari-Regular.ttf",
 		"C:/Windows/Fonts/NotoSansDevanagari-Bold.ttf",
+		"C:/Windows/Fonts/mangal.ttf",  # Mangal (common Windows Devanagari font)
+		"C:/Windows/Fonts/MANGAL.TTF",
+		"C:/Windows/Fonts/mangalb.ttf",  # Mangal Bold
+		"C:/Windows/Fonts/MANGALB.TTF",
+		"C:/Windows/Fonts/nirmala.ttf",  # Nirmala UI (Windows 10+)
+		"C:/Windows/Fonts/NIRMALA.TTF",
+		"C:/Windows/Fonts/nirmalab.ttf",  # Nirmala UI Bold
+		"C:/Windows/Fonts/NIRMALAB.TTF",
+		"C:/Windows/Fonts/nirmalas.ttf",  # Nirmala UI Semibold
+		"C:/Windows/Fonts/NIRMALAS.TTF",
 		# Alternative Unicode fonts
 		"/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
 		"/Library/Fonts/Arial Unicode.ttf",
@@ -617,6 +627,38 @@ def _register_devanagari_fonts():
 		else:
 			expanded_paths.append(path)
 	font_paths = expanded_paths
+	
+	# Windows-specific: Search Windows Fonts directory dynamically
+	if os.name == 'nt':  # Windows
+		try:
+			import glob
+			# Try different possible Windows font directories
+			windows_font_dirs = [
+				os.path.join(os.environ.get('WINDIR', 'C:/Windows'), 'Fonts'),
+				'C:/Windows/Fonts',
+				'D:/Windows/Fonts',  # In case Windows is on D: drive
+			]
+			for font_dir in windows_font_dirs:
+				if os.path.exists(font_dir):
+					# Search for Devanagari-related fonts
+					patterns = [
+						'*devanagari*',
+						'*Devanagari*',
+						'*mangal*',
+						'*Mangal*',
+						'*MANGAL*',
+						'*nirmala*',
+						'*Nirmala*',
+						'*NIRMALA*',
+						'*noto*devanagari*',
+						'*Noto*Devanagari*',
+					]
+					for pattern in patterns:
+						for font_file in glob.glob(os.path.join(font_dir, pattern)):
+							if font_file not in font_paths and (font_file.lower().endswith('.ttf') or font_file.lower().endswith('.ttc')):
+								font_paths.append(font_file)
+		except Exception as e:
+			logger.debug(f"Could not search Windows fonts directory: {e}")
 	
 	# Also try to find fonts dynamically (for macOS .ttc files)
 	try:
@@ -635,12 +677,20 @@ def _register_devanagari_fonts():
 		logger.debug(f"Could not search for fonts dynamically: {e}")
 	
 	registered = {"regular": None, "bold": None}
+	regular_font_path = None  # Track which path was used for regular
 	
 	for font_path in font_paths:
 		if os.path.exists(font_path):
 			try:
 				# Determine if this is a bold font
-				is_bold = "Bold" in font_path or "bold" in font_path.lower() or "ITF" in font_path
+				font_lower = font_path.lower()
+				is_bold = (
+					"bold" in font_lower or 
+					"b" in font_lower.split('.')[0].split('\\')[-1].split('/')[-1][-1:] or
+					"ITF" in font_path or
+					"semibold" in font_lower or
+					"semi" in font_lower
+				)
 				
 				# For TTC files, we might need to specify subfont index (0 for regular, 1 for bold)
 				# But TTFont can usually handle TTC files automatically
@@ -651,6 +701,7 @@ def _register_devanagari_fonts():
 				elif not is_bold and not registered["regular"]:
 					pdfmetrics.registerFont(TTFont("Devanagari", font_path))
 					registered["regular"] = "Devanagari"
+					regular_font_path = font_path
 					logger.info(f"Registered Devanagari regular font: {font_path}")
 				
 				# If we have both fonts, we can stop searching
@@ -660,15 +711,28 @@ def _register_devanagari_fonts():
 				logger.warning(f"Failed to register font {font_path}: {e}")
 				continue
 	
+	# If we only found one font, use it for both regular and bold
+	if registered["regular"] and not registered["bold"] and regular_font_path:
+		try:
+			# Try to register the same font as bold (will work but won't be truly bold)
+			pdfmetrics.registerFont(TTFont("Devanagari-Bold", regular_font_path))
+			registered["bold"] = "Devanagari-Bold"
+			logger.info(f"Using regular font for bold (no bold variant found): {regular_font_path}")
+		except Exception as e:
+			logger.warning(f"Failed to register regular font as bold: {e}")
+			registered["bold"] = registered["regular"]
+	
 	# If no Devanagari font found, use default (will show garbled text for Devanagari)
 	if not registered["regular"]:
 		logger.warning("No Devanagari font found. Devanagari text may not render correctly.")
-		logger.warning("To enable Devanagari support, install Noto Sans Devanagari font:")
+		logger.warning("To enable Devanagari support, install a Devanagari font:")
 		logger.warning("  macOS: Font is usually pre-installed")
 		logger.warning("  Linux: sudo apt-get install fonts-noto-core")
-		logger.warning("  Windows: Download from https://fonts.google.com/noto/specimen/Noto+Sans+Devanagari")
+		logger.warning("  Windows: Mangal or Nirmala UI fonts are usually pre-installed, or download Noto Sans Devanagari from https://fonts.google.com/noto/specimen/Noto+Sans+Devanagari")
 		registered["regular"] = "Helvetica"
 		registered["bold"] = "Helvetica-Bold"
+	else:
+		logger.info(f"Successfully registered Devanagari fonts: regular={registered['regular']}, bold={registered['bold']}")
 	
 	_DEVANAGARI_FONTS = registered
 	return registered
@@ -1078,110 +1142,6 @@ def _generate_pdf(data_rows: List[dict], cols_display: List[str], col_map: dict,
 	
 	story.append(table)
 	# Footer is now added via canvas in _add_first_page_header_footer
-	
-	# Detailed transaction pages
-	for idx, row in enumerate(data_rows):
-		story.append(PageBreak())
-		
-		# Page header with styled background
-		try:
-			page_header = ParagraphStyle("PageHeader", parent=styles["Heading1"], fontSize=18, fontName=devanagari_bold, 
-				textColor=colors.white, alignment=TA_LEFT, backColor=primary_dark, 
-				leftIndent=12, rightIndent=12, spaceBefore=0, spaceAfter=0)
-		except Exception:
-			page_header = ParagraphStyle("PageHeader", parent=styles["Heading1"], fontSize=18, fontName="Helvetica-Bold", 
-				textColor=colors.white, alignment=TA_LEFT, backColor=primary_dark, 
-				leftIndent=12, rightIndent=12, spaceBefore=0, spaceAfter=0)
-		
-		header_table = Table([[Paragraph("&nbsp;Transaction Search Report&nbsp;", page_header)]], colWidths=[page_size[0] - 30*mm])
-		header_table.setStyle(TableStyle([
-			("BACKGROUND", (0, 0), (-1, -1), primary_dark),
-			("LINEBELOW", (0, 0), (-1, -1), 3, accent_color),
-			("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-			("TOPPADDING", (0, 0), (-1, -1), 10),
-			("BOTTOMPADDING", (0, 0), (-1, -1), 10),
-		]))
-		story.append(header_table)
-		story.append(Spacer(1, 6*mm))
-		
-		date_str = datetime.now().strftime("%B %d, %Y")
-		try:
-			date_style = ParagraphStyle("Date", parent=styles["Normal"], fontSize=9, fontName=devanagari_font, 
-				textColor=text_light, alignment=TA_RIGHT)
-		except Exception:
-			date_style = ParagraphStyle("Date", parent=styles["Normal"], fontSize=9, fontName="Helvetica", 
-				textColor=text_light, alignment=TA_RIGHT)
-		date_para = Paragraph(f"Generated on: {date_str}", date_style)
-		story.append(date_para)
-		story.append(Spacer(1, 8*mm))
-		
-		# Transaction title with badge
-		try:
-			trans_heading = ParagraphStyle("TransHeading", parent=styles["Heading2"], fontSize=14, fontName=devanagari_bold, 
-				textColor=primary_dark, alignment=TA_LEFT, spaceAfter=8)
-		except Exception:
-			trans_heading = ParagraphStyle("TransHeading", parent=styles["Heading2"], fontSize=14, fontName="Helvetica-Bold", 
-				textColor=primary_dark, alignment=TA_LEFT, spaceAfter=8)
-		story.append(Paragraph(f"Transaction {idx + 1} of {len(data_rows)}", trans_heading))
-		story.append(Spacer(1, 6*mm))
-		
-		# Get all columns for this row
-		all_cols = [k for k in row.keys() if k not in ["pan_upper", "pan_raw", "match_score", "name_hit_field", "name_hit_snippet", "name_hit_snippet_html", "pan_hit_field", "pan_hit_snippet_html"]]
-		all_cols.sort()
-		
-		# Create detail table - use Paragraphs for Unicode support
-		detail_data = []
-		for col in all_cols:
-			val = row.get(col, "")
-			if val is not None:
-				val_str = _strip_html(str(val))
-				if len(val_str) > 300:  # More space in landscape
-					val_str = val_str[:300] + "..."
-			else:
-				val_str = ""
-			# Escape XML and ensure UTF-8 encoding
-			val_str = val_str.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-			if isinstance(val_str, bytes):
-				val_str = val_str.decode('utf-8', errors='ignore')
-			# Create Paragraphs with Devanagari font support
-			# Note: ParagraphStyle doesn't have an encoding parameter - reportlab handles UTF-8 automatically
-			try:
-				col_para = Paragraph(str(col), ParagraphStyle("DetailLabel", parent=styles["Normal"], fontSize=9, fontName=table_bold, textColor=colors.white))
-				val_para = Paragraph(val_str, ParagraphStyle("DetailValue", parent=styles["Normal"], fontSize=8, fontName=table_font, textColor=text_dark))
-			except Exception:
-				# Fallback if style creation fails
-				col_para = Paragraph(str(col), ParagraphStyle("DetailLabel", parent=styles["Normal"], fontSize=9, fontName="Helvetica-Bold", textColor=colors.white))
-				val_para = Paragraph(val_str, ParagraphStyle("DetailValue", parent=styles["Normal"], fontSize=8, fontName="Helvetica", textColor=text_dark))
-			detail_data.append([col_para, val_para])
-		
-		# Use more width in landscape mode
-		detail_table = Table(detail_data, colWidths=[90*mm, None])
-		detail_table.setStyle(TableStyle([
-			# Label column with blue background
-			("BACKGROUND", (0, 0), (0, -1), primary_dark),
-			("TEXTCOLOR", (0, 0), (0, -1), colors.white),
-			("FONTNAME", (0, 0), (0, -1), table_bold),
-			("FONTSIZE", (0, 0), (0, -1), 9),
-			("LEFTPADDING", (0, 0), (0, -1), 8),
-			("RIGHTPADDING", (0, 0), (0, -1), 8),
-			# Value column
-			("BACKGROUND", (1, 0), (1, -1), colors.white),
-			("TEXTCOLOR", (1, 0), (1, -1), text_dark),
-			("FONTNAME", (1, 0), (1, -1), table_font),
-			("FONTSIZE", (1, 0), (1, -1), 8),
-			("LEFTPADDING", (1, 0), (1, -1), 8),
-			("RIGHTPADDING", (1, 0), (1, -1), 8),
-			# Grid with better borders
-			("GRID", (0, 0), (-1, -1), 0.5, border_color),
-			("LINEAFTER", (0, 0), (0, -1), 1, primary_color),  # Blue line after label column
-			("VALIGN", (0, 0), (-1, -1), "TOP"),
-			("TOPPADDING", (0, 0), (-1, -1), 6),
-			("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-			# Alternating rows for value column
-			("ROWBACKGROUNDS", (1, 0), (1, -1), [colors.white, bg_light]),
-		]))
-		
-		story.append(detail_table)
 	
 	# Build PDF with error handling
 	# Get logo and footer paths
