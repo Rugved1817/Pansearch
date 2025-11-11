@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>Cart • Pansearch</title>
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+	<style>
+		:root {
+			--bg: #0a0d12;
+			--bg-2: #0b1118;
+			--panel: rgba(12,18,26,0.92);
+			--border: #1a2431;
+			--border-light: rgba(155,140,255,0.25);
+			--text: #eaf1f8;
+			--muted: #9fb2c6;
+			--accent: #9b8cff;
+			--danger: #ff6b6b;
+		}
+		* { box-sizing: border-box; margin: 0; padding: 0; }
+		body {
+			min-height: 100vh;
+			background:
+				radial-gradient(1200px 700px at 8% -8%, rgba(96,213,255,0.08), transparent 65%),
+				radial-gradient(900px 600px at 100% 0%, rgba(155,140,255,0.09), transparent 60%),
+				linear-gradient(180deg, var(--bg), var(--bg-2));
+			color: var(--text);
+			font-family: "Inter", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+			padding: 32px 16px 48px;
+		}
+		.container {
+			max-width: 1080px;
+			margin: 0 auto;
+		}
+		.header {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 16px;
+			margin-bottom: 28px;
+			padding-bottom: 20px;
+			border-bottom: 1px solid var(--border);
+		}
+		h1 {
+			font-size: 30px;
+			font-weight: 700;
+			background: linear-gradient(135deg, #9b8cff, #60d5ff);
+			-webkit-background-clip: text;
+			background-clip: text;
+			-webkit-text-fill-color: transparent;
+			letter-spacing: -0.4px;
+		}
+		.nav-button {
+			display: inline-flex;
+			align-items: center;
+			gap: 10px;
+			background: linear-gradient(135deg, rgba(155,140,255,0.15), rgba(96,213,255,0.12));
+			padding: 10px 18px;
+			border-radius: 999px;
+			color: #d7deff;
+			text-decoration: none;
+			font-weight: 600;
+			border: 1px solid rgba(155,140,255,0.3);
+			box-shadow: 0 8px 20px rgba(155,140,255,0.15);
+			transition: all 0.25s ease;
+		}
+		.nav-button:hover {
+			transform: translateY(-1px);
+			box-shadow: 0 12px 26px rgba(155,140,255,0.25);
+		}
+		.card {
+			background: var(--panel);
+			border: 1px solid var(--border-light);
+			border-radius: 20px;
+			box-shadow: 0 24px 60px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.03) inset;
+			padding: 24px;
+			backdrop-filter: saturate(120%) blur(12px);
+		}
+		.cart-empty {
+			text-align: center;
+			padding: 48px 16px;
+			color: var(--muted);
+			font-size: 15px;
+		}
+		.cart-controls {
+			display: flex;
+			justify-content: flex-end;
+			align-items: center;
+			gap: 12px;
+			margin-bottom: 20px;
+			flex-wrap: wrap;
+		}
+		.btn {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			gap: 6px;
+			background: linear-gradient(135deg, rgba(37,50,70,0.75), rgba(27,37,51,0.85));
+			color: #e8f3ff;
+			padding: 10px 18px;
+			border-radius: 12px;
+			border: 1px solid rgba(30,42,58,0.8);
+			cursor: pointer;
+			font-size: 13px;
+			font-weight: 600;
+			transition: all 0.2s ease;
+			text-decoration: none;
+		}
+		.btn:hover {
+			transform: translateY(-1px);
+			filter: brightness(1.1);
+		}
+		.btn-danger {
+			background: linear-gradient(135deg, rgba(255,107,107,0.18), rgba(255,107,107,0.26));
+			border-color: rgba(255,107,107,0.5);
+			color: #ffdada;
+		}
+		.table-wrap {
+			overflow-x: auto;
+			border-radius: 16px;
+			border: 1px solid rgba(30,42,58,0.8);
+		}
+		table {
+			width: 100%;
+			border-collapse: collapse;
+			min-width: 640px;
+		}
+		thead th {
+			text-align: left;
+			text-transform: uppercase;
+			letter-spacing: 0.4px;
+			font-size: 12px;
+			padding: 14px 16px;
+			background: rgba(16,24,36,0.9);
+			color: #cfd8ff;
+			position: sticky;
+			top: 0;
+		}
+		tbody td {
+			padding: 14px 16px;
+			border-bottom: 1px solid rgba(28,37,50,0.65);
+			font-size: 13px;
+			color: #e0e8ff;
+		}
+		tbody tr:nth-child(even) {
+			background: rgba(12,18,27,0.75);
+		}
+		.cart-remove {
+			background: rgba(255,107,107,0.22);
+			border: 1px solid rgba(255,107,107,0.45);
+			color: #ff9a9a;
+			padding: 6px 12px;
+			border-radius: 10px;
+			font-size: 12px;
+			font-weight: 600;
+			cursor: pointer;
+			transition: all 0.2s ease;
+		}
+		.cart-remove:hover {
+			background: rgba(255,107,107,0.35);
+			color: #ffecec;
+		}
+		.toast {
+			position: fixed;
+			right: 24px;
+			bottom: 24px;
+			padding: 12px 16px;
+			border-radius: 12px;
+			background: linear-gradient(135deg, rgba(18,32,52,0.9), rgba(12,24,40,0.92));
+			border: 1px solid rgba(155,140,255,0.3);
+			color: #eaf1f8;
+			box-shadow: 0 12px 28px rgba(0,0,0,0.4);
+			display: none;
+			z-index: 100;
+		}
+		.toast.show {
+			display: block;
+			animation: fade 2.4s ease forwards;
+		}
+		@keyframes fade {
+			0% { opacity: 0; transform: translateY(12px); }
+			10% { opacity: 1; transform: translateY(0); }
+			90% { opacity: 1; transform: translateY(0); }
+			100% { opacity: 0; transform: translateY(12px); }
+		}
+		@media (max-width: 720px) {
+			h1 { font-size: 26px; }
+			.card { padding: 20px; }
+			thead th, tbody td { padding: 12px; }
+		}
+	</style>
+</head>
+<body>
+	<div class="container">
+		<div class="header">
+			<h1>Cart</h1>
+			<a class="nav-button" href="index.html" title="Back to search">← Back to Search</a>
+		</div>
+
+		<div class="card">
+			<div class="cart-controls">
+				<span id="cartStatus" style="color: var(--muted); font-size: 14px;">Loading…</span>
+				<button id="btnClearCart" class="btn btn-danger">Clear Cart</button>
+			</div>
+			<div id="cartContent"></div>
+		</div>
+	</div>
+
+	<div id="toast" class="toast"></div>
+
+	<script>
+	const CART_STORAGE_KEY = 'pansearch_cart_v1';
+
+	const el = id => document.getElementById(id);
+
+	const showToast = (msg) => {
+		const t = el('toast');
+		t.textContent = msg;
+		t.classList.add('show');
+		setTimeout(() => t.classList.remove('show'), 2400);
+	};
+
+	const loadCart = () => {
+		try {
+			const raw = localStorage.getItem(CART_STORAGE_KEY);
+			if (!raw) return new Map();
+			const parsed = JSON.parse(raw);
+			return new Map(parsed.map(item => [item.key, item.row]));
+		} catch (err) {
+			console.warn('Failed to load cart', err);
+			return new Map();
+		}
+	};
+
+	const saveCart = (map) => {
+		try {
+			const payload = Array.from(map.entries()).map(([key, row]) => ({ key, row }));
+			localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(payload));
+		} catch (err) {
+			console.warn('Failed to save cart', err);
+		}
+	};
+
+	const formatField = (row, keys) => {
+		for (const key of keys) {
+			if (row && row[key] !== undefined && row[key] !== null) {
+				const text = String(row[key]).trim();
+				if (text) return text;
+			}
+		}
+		return '';
+	};
+
+	const renderCart = () => {
+		const content = el('cartContent');
+		const status = el('cartStatus');
+		const cart = loadCart();
+		const size = cart.size;
+		status.textContent = `${size} item${size === 1 ? '' : 's'}`;
+
+		if (!size) {
+			content.innerHTML = '<p class="cart-empty">Cart is empty. Go back to the search page and add transactions to your cart.</p>';
+			return;
+		}
+
+		const tableWrap = document.createElement('div');
+		tableWrap.className = 'table-wrap';
+		const table = document.createElement('table');
+
+		const thead = document.createElement('thead');
+		const hr = document.createElement('tr');
+		['PAN', 'Buyer', 'Seller', 'Doc No', 'Year', 'Actions'].forEach(text => {
+			const th = document.createElement('th');
+			th.textContent = text;
+			hr.appendChild(th);
+		});
+		thead.appendChild(hr);
+		table.appendChild(thead);
+
+		const tbody = document.createElement('tbody');
+		for (const [key, row] of cart.entries()) {
+			const tr = document.createElement('tr');
+			const pan = formatField(row, ['pan_numbers', 'PAN', 'pan']);
+			const buyer = formatField(row, ['buyer', 'Buyer']);
+			const seller = formatField(row, ['seller', 'Seller']);
+			const doc = formatField(row, ['DocNo', 'doc_no', 'docno', 'DocumentNo']);
+			const year = formatField(row, ['year', 'Year', 'YEAR']);
+
+			[[pan], [buyer], [seller], [doc], [year]].forEach(([text]) => {
+				const td = document.createElement('td');
+				td.textContent = text;
+				tr.appendChild(td);
+			});
+
+			const actionTd = document.createElement('td');
+			const removeBtn = document.createElement('button');
+			removeBtn.className = 'cart-remove';
+			removeBtn.textContent = 'Remove';
+			removeBtn.onclick = () => {
+				cart.delete(key);
+				saveCart(cart);
+				renderCart();
+				showToast('Removed from cart');
+			};
+			actionTd.appendChild(removeBtn);
+			tr.appendChild(actionTd);
+
+			tbody.appendChild(tr);
+		}
+		table.appendChild(tbody);
+		tableWrap.appendChild(table);
+		content.innerHTML = '';
+		content.appendChild(tableWrap);
+	};
+
+	el('btnClearCart').onclick = () => {
+		const cart = loadCart();
+		if (!cart.size) {
+			showToast('Cart is already empty');
+			return;
+		}
+		if (!confirm('Clear all items from the cart?')) return;
+		localStorage.removeItem(CART_STORAGE_KEY);
+		renderCart();
+		showToast('Cart cleared');
+	};
+
+	renderCart();
+	</script>
+</body>
+</html>
+
