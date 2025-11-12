@@ -555,6 +555,28 @@
 			border-color: rgba(155,140,255,0.3);
 		}
 
+		.floating-controls {
+			position: fixed;
+			right: 28px;
+			bottom: 28px;
+			display: flex;
+			gap: 16px;
+			align-items: center;
+			padding: 14px 18px;
+			background: rgba(12, 18, 26, 0.85);
+			border: 1px solid rgba(155, 140, 255, 0.25);
+			border-radius: 18px;
+			box-shadow: 0 20px 40px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.04) inset;
+			backdrop-filter: saturate(130%) blur(12px);
+			z-index: 900;
+		}
+		.floating-buttons {
+			display: flex;
+			align-items: center;
+			gap: 10px;
+			flex-wrap: wrap;
+		}
+
 		@media (max-width: 900px) {
 			.container { padding: 24px 16px; }
 			h1 { font-size: 26px; }
@@ -566,13 +588,30 @@
 			.pagination { justify-content: center; }
 			.card { padding: 20px; }
 		}
+
+		@media (max-width: 720px) {
+			.floating-controls {
+				left: 12px;
+				right: 12px;
+				bottom: 16px;
+				flex-direction: column;
+				align-items: stretch;
+			}
+			.floating-buttons {
+				width: 100%;
+				justify-content: space-between;
+			}
+			.floating-buttons .btn {
+				flex: 1 1 auto;
+			}
+		}
 	</style>
 </head>
 <body>
 	<div class="container">
 		<div class="header">
 			<h1>Transactions Search</h1>
-			<a id="btnCart" class="cart-button" href="cart.html" title="View cart">
+			<a id="headerCartLink" class="cart-button" href="cart.html" title="View cart">
 				<span>Cart</span>
 				<span class="cart-dot">•</span>
 				<span id="headerCartCount" class="cart-count">0</span>
@@ -607,20 +646,6 @@
 					<input id="threshold" type="range" min="0" max="100" value="75" step="1" style="width:140px;" aria-label="Fuzzy match threshold" />
 					<span id="thresholdValue" class="stat">75</span>
 				</div>
-				<div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-					<label class="label" style="margin:0;">Page size</label>
-					<select id="pageSize" class="select">
-						<option>20</option>
-						<option>50</option>
-						<option selected>100</option>
-						<option>200</option>
-					</select>
-					<button id="btnSelectVisible" class="btn" title="Select all rows visible on this page">Select Page</button>
-					<button id="btnSelectAll" class="btn" title="Select every row in current results">Select All</button>
-					<button id="btnClearSelection" class="btn btn-ghost" title="Clear all selected rows">Clear</button>
-					<button id="btnAddToCart" class="btn btn-primary" title="Move selected rows into cart" disabled>Add to Cart</button>
-					<button id="btnCart" class="btn" title="View cart items">Cart (0)</button>
-				</div>
 			</div>
 		</div>
 
@@ -632,6 +657,24 @@
 				<span id="pageInfo" class="stat">Page-1 / 1</span>
 				<button class="btn" id="next">Next</button>
 			</div>
+		</div>
+	</div>
+
+	<div id="floatingControls" class="floating-controls" style="display:none;">
+		<div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+			<label class="label" style="margin:0;">Page size</label>
+			<select id="pageSize" class="select">
+				<option>20</option>
+				<option>50</option>
+				<option selected>100</option>
+				<option>200</option>
+			</select>
+		</div>
+		<div class="floating-buttons">
+			<button id="btnSelectVisible" class="btn" title="Select all rows visible on this page">Select Page</button>
+			<button id="btnSelectAll" class="btn" title="Select every row in current results">Select All</button>
+			<button id="btnClearSelection" class="btn btn-ghost" title="Clear all selected rows">Clear</button>
+			<button id="btnAddToCart" class="btn btn-primary" title="Move selected rows into cart" disabled>Add to Cart</button>
 		</div>
 	</div>
 
@@ -662,6 +705,8 @@
 		}
 	};
 	const CART_STORAGE_KEY = 'pansearch_cart_v1';
+const floatingControlsEl = el('floatingControls');
+const headerCartLink = el('headerCartLink');
 	const updateSelectedCount = () => {
 		const badge = el('selectedCount');
 		if (badge) badge.textContent = `Selected ${state.selectedKeys.size}`;
@@ -672,8 +717,7 @@
 		const count = state.cartItems.size;
 		const countEl = el('headerCartCount');
 		if (countEl) countEl.textContent = String(count);
-		const cartBtn = el('btnCart');
-		if (cartBtn) cartBtn.title = `View cart (${count})`;
+	if (headerCartLink) headerCartLink.title = `View cart (${count})`;
 	};
 	const saveCart = () => {
 		try {
@@ -714,7 +758,14 @@
 
 	function showToast(msg){ const t = el('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'), 2200); }
 	function setStatus(msg){ el('stat').textContent = msg; }
-	function setLoading(on){ el('loading').style.display = on ? 'block':'none'; el('table').style.display = on ? 'none':'table'; el('pager').style.display = on ? 'none':'flex'; }
+function setLoading(on){
+	el('loading').style.display = on ? 'block':'none';
+	el('table').style.display = on ? 'none':'table';
+	el('pager').style.display = on ? 'none':'flex';
+	if (floatingControlsEl) {
+		floatingControlsEl.style.display = (!on && state.rows.length) ? 'flex' : 'none';
+	}
+}
 
 	async function fetchPhonetics(){
 		const seed = el('seed').value.trim();
@@ -1003,9 +1054,11 @@
 		if (!state.rows.length){
 			table.style.display='none';
 			if (pager) pager.style.display='none';
+		if (floatingControlsEl) floatingControlsEl.style.display = 'none';
 			updateSelectedCount();
 			return;
 		}
+	if (floatingControlsEl) floatingControlsEl.style.display = 'flex';
 		const pageRows = paginate(state.rows, state.page, state.pageSize);
 		table.style.display='table';
 		const thead = document.createElement('thead');
