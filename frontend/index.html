@@ -477,6 +477,123 @@
 			92% { opacity: 1; transform: translateY(0) scale(1);}
 			100%{ opacity:0; transform: translateY(12px) scale(0.95);} 
 		}
+		
+		.modal {
+			position: fixed;
+			top: 0;
+			left: 0;
+			right: 0;
+			bottom: 0;
+			background: rgba(0, 0, 0, 0.7);
+			backdrop-filter: blur(8px);
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			z-index: 2000;
+			padding: 20px;
+		}
+		.modal-content {
+			background: var(--panel);
+			border: 1px solid var(--border-light);
+			border-radius: 20px;
+			box-shadow: 0 24px 60px rgba(0,0,0,0.5);
+			width: 100%;
+			max-width: 500px;
+			max-height: 90vh;
+			overflow: hidden;
+			display: flex;
+			flex-direction: column;
+		}
+		.modal-header {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			padding: 20px 24px;
+			border-bottom: 1px solid var(--border);
+		}
+		.modal-header h3 {
+			margin: 0;
+			font-size: 20px;
+			font-weight: 700;
+			background: linear-gradient(135deg, #9b8cff, #60d5ff);
+			-webkit-background-clip: text;
+			background-clip: text;
+			-webkit-text-fill-color: transparent;
+		}
+		.modal-close {
+			background: transparent;
+			border: none;
+			color: var(--muted);
+			font-size: 28px;
+			cursor: pointer;
+			padding: 0;
+			width: 32px;
+			height: 32px;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			border-radius: 8px;
+			transition: all 0.2s ease;
+		}
+		.modal-close:hover {
+			background: rgba(255,107,107,0.2);
+			color: #ff6b6b;
+		}
+		.modal-body {
+			padding: 24px;
+			flex: 1;
+			overflow-y: auto;
+		}
+		.modal-label {
+			display: block;
+			margin-bottom: 8px;
+			color: var(--text);
+			font-size: 14px;
+			font-weight: 600;
+		}
+		.modal-select {
+			width: 100%;
+			padding: 12px 16px;
+			background: rgba(12,19,27,0.8);
+			border: 1px solid var(--border);
+			border-radius: 12px;
+			color: var(--text);
+			font-size: 14px;
+			font-family: inherit;
+			cursor: pointer;
+			transition: all 0.2s ease;
+		}
+		.modal-select:hover {
+			border-color: var(--border-light);
+		}
+		.modal-select:focus {
+			outline: none;
+			border-color: var(--accent);
+			box-shadow: 0 0 0 3px rgba(155,140,255,0.2);
+		}
+		.modal-input {
+			flex: 1;
+			padding: 12px 16px;
+			background: rgba(12,19,27,0.8);
+			border: 1px solid var(--border);
+			border-radius: 12px;
+			color: var(--text);
+			font-size: 14px;
+			font-family: inherit;
+		}
+		.modal-input:focus {
+			outline: none;
+			border-color: var(--accent);
+			box-shadow: 0 0 0 3px rgba(155,140,255,0.2);
+		}
+		.modal-footer {
+			display: flex;
+			align-items: center;
+			justify-content: flex-end;
+			gap: 12px;
+			padding: 20px 24px;
+			border-top: 1px solid var(--border);
+		}
 
 		.skeleton { 
 			background: linear-gradient(90deg, #0e1520 25%, #121b29 37%, #0e1520 63%); 
@@ -680,6 +797,33 @@
 
 	<div class="toast" id="toast"></div>
 
+	<!-- Project Selector Modal -->
+	<div id="projectModal" class="modal" style="display: none;">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h3>Select Project</h3>
+				<button class="modal-close" onclick="el('projectModal').style.display='none'">×</button>
+			</div>
+			<div class="modal-body">
+				<label class="modal-label">Choose a project:</label>
+				<select id="projectSelect" class="modal-select">
+					<!-- Projects will be populated here -->
+				</select>
+				<div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border);">
+					<label class="modal-label">Or create a new project:</label>
+					<div style="display: flex; gap: 8px; margin-top: 8px;">
+						<input type="text" id="newProjectName" class="modal-input" placeholder="Project name" />
+						<button id="btnCreateProject" class="btn btn-primary">Create & Add</button>
+					</div>
+				</div>
+			</div>
+			<div class="modal-footer">
+				<button class="btn btn-ghost" onclick="el('projectModal').style.display='none'">Cancel</button>
+				<button id="btnConfirmAddToProject" class="btn btn-primary">Add to Project</button>
+			</div>
+		</div>
+	</div>
+
 	<!-- PDF Generation Libraries -->
 	<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 	<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
@@ -704,53 +848,153 @@
 			if (!validKeys.has(key)) state.selectedKeys.delete(key);
 		}
 	};
-	const CART_STORAGE_KEY = 'pansearch_cart_v1';
+	const CART_STORAGE_KEY = 'pansearch_cart_v2';
 const floatingControlsEl = el('floatingControls');
 const headerCartLink = el('headerCartLink');
+	
+	// Project management functions
+	const getProjects = () => {
+		try {
+			const raw = localStorage.getItem(CART_STORAGE_KEY);
+			if (!raw) {
+				// Initialize with default project
+				const defaultData = {
+					projects: {
+						'default': { name: 'Default Project', items: [] }
+					},
+					currentProject: 'default'
+				};
+				localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(defaultData));
+				return defaultData;
+			}
+			const parsed = JSON.parse(raw);
+			// Migrate old format if needed
+			if (Array.isArray(parsed)) {
+				const migrated = {
+					projects: {
+						'default': { name: 'Default Project', items: parsed }
+					},
+					currentProject: 'default'
+				};
+				localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(migrated));
+				return migrated;
+			}
+			return parsed;
+		} catch (err) {
+			console.warn('Failed to load projects', err);
+			return {
+				projects: { 'default': { name: 'Default Project', items: [] } },
+				currentProject: 'default'
+			};
+		}
+	};
+	
+	const saveProjects = (projectsData) => {
+		try {
+			localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(projectsData));
+		} catch (err) {
+			console.warn('Failed to save projects', err);
+		}
+	};
+	
+	const getCurrentProject = () => {
+		const data = getProjects();
+		return data.currentProject || 'default';
+	};
+	
+	const getProjectItems = (projectId) => {
+		const data = getProjects();
+		const project = data.projects[projectId || data.currentProject];
+		if (!project) return new Map();
+		return new Map(project.items.map(item => [item.key, item.row]));
+	};
+	
+	const addToProject = (projectId, items) => {
+		const data = getProjects();
+		if (!data.projects[projectId]) {
+			data.projects[projectId] = { name: `Project ${Object.keys(data.projects).length + 1}`, items: [] };
+		}
+		const project = data.projects[projectId];
+		const existingKeys = new Set(project.items.map(item => item.key));
+		let added = 0;
+		for (const [key, row] of items.entries()) {
+			if (!existingKeys.has(key)) {
+				project.items.push({ key, row });
+				existingKeys.add(key);
+				added++;
+			}
+		}
+		saveProjects(data);
+		return added;
+	};
+	
+	const createProject = (name) => {
+		const data = getProjects();
+		const projectId = `project_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+		data.projects[projectId] = { name: name || `Project ${Object.keys(data.projects).length + 1}`, items: [] };
+		data.currentProject = projectId;
+		saveProjects(data);
+		return projectId;
+	};
+	
 	const updateSelectedCount = () => {
 		const badge = el('selectedCount');
 		if (badge) badge.textContent = `Selected ${state.selectedKeys.size}`;
 		const addBtn = el('btnAddToCart');
 		if (addBtn) addBtn.disabled = state.selectedKeys.size === 0;
 	};
+	
 	const updateCartCount = () => {
-		const count = state.cartItems.size;
+		const data = getProjects();
+		let totalCount = 0;
+		for (const project of Object.values(data.projects)) {
+			totalCount += project.items.length;
+		}
 		const countEl = el('headerCartCount');
-		if (countEl) countEl.textContent = String(count);
-	if (headerCartLink) headerCartLink.title = `View cart (${count})`;
+		if (countEl) countEl.textContent = String(totalCount);
+		if (headerCartLink) headerCartLink.title = `View cart (${totalCount})`;
 	};
+	
 	const saveCart = () => {
-		try {
-			const data = Array.from(state.cartItems.entries()).map(([key, row]) => ({ key, row }));
-			localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(data));
-		} catch (err) {
-			console.warn('Failed to save cart', err);
-		}
+		// Legacy function - now handled by project functions
+		updateCartCount();
 	};
+	
 	const loadCart = () => {
-		try {
-			const raw = localStorage.getItem(CART_STORAGE_KEY);
-			if (!raw) {
-				state.cartItems = new Map();
-				return;
-			}
-			const parsed = JSON.parse(raw);
-			state.cartItems = new Map(parsed.map(item => [item.key, item.row]));
-		} catch (err) {
-			console.warn('Failed to load cart', err);
-			state.cartItems = new Map();
-		}
+		// Legacy function - now handled by project functions
+		const currentProjectId = getCurrentProject();
+		state.cartItems = getProjectItems(currentProjectId);
 	};
 	const buildRowIndex = () => {
 		state.rowIndex = new Map();
+		const data = getProjects();
+		const currentProjectId = data.currentProject || 'default';
+		const projectItems = getProjectItems(currentProjectId);
+		
 		for (const row of state.allRows) {
 			const key = getRowKey(row);
 			state.rowIndex.set(key, row);
-			if (state.cartItems.has(key)) {
+			if (projectItems.has(key)) {
 				state.cartItems.set(key, row);
 			}
 		}
-		saveCart();
+		updateCartCount();
+	};
+	
+	const populateProjectSelect = () => {
+		const select = el('projectSelect');
+		if (!select) return;
+		const data = getProjects();
+		select.innerHTML = '';
+		for (const [projectId, project] of Object.entries(data.projects)) {
+			const option = document.createElement('option');
+			option.value = projectId;
+			option.textContent = `${project.name} (${project.items.length} items)`;
+			if (projectId === data.currentProject) {
+				option.selected = true;
+			}
+			select.appendChild(option);
+		}
 	};
 	let state = { allRows: [], rows: [], colsDisplay: [], colMap: {}, page: 1, pageSize: 100, threshold: 0.75, selectedKeys: new Set(), cartItems: new Map(), rowIndex: new Map() };
 	loadCart();
@@ -1669,24 +1913,74 @@ if (addToCartBtn) {
 			showToast('Select at least one row first');
 			return;
 		}
-		let added = 0;
-		for (const key of state.selectedKeys) {
-			const row = state.rowIndex.get(key);
-			if (!row) continue;
-			if (!state.cartItems.has(key)) {
-				state.cartItems.set(key, row);
-				added += 1;
-			}
-		}
-		if (added === 0) {
-			showToast('Selected rows are already in the cart');
-		} else {
-			saveCart();
-			updateCartCount();
-			showToast(`Added ${added} item${added === 1 ? '' : 's'} to cart`);
-		}
+		populateProjectSelect();
+		el('projectModal').style.display = 'flex';
 	};
 }
+
+// Handle project selection and adding items
+el('btnConfirmAddToProject').onclick = () => {
+	const projectId = el('projectSelect').value;
+	if (!projectId) {
+		showToast('Please select a project');
+		return;
+	}
+	
+	// Collect selected items
+	const itemsToAdd = new Map();
+	for (const key of state.selectedKeys) {
+		const row = state.rowIndex.get(key);
+		if (row) {
+			itemsToAdd.set(key, row);
+		}
+	}
+	
+	if (itemsToAdd.size === 0) {
+		showToast('No items to add');
+		return;
+	}
+	
+	const added = addToProject(projectId, itemsToAdd);
+	el('projectModal').style.display = 'none';
+	updateCartCount();
+	showToast(`Added ${added} item${added === 1 ? '' : 's'} to project`);
+	state.selectedKeys.clear();
+	updateSelectedCount();
+	render();
+};
+
+// Handle creating new project and adding items
+el('btnCreateProject').onclick = () => {
+	const projectName = el('newProjectName').value.trim();
+	if (!projectName) {
+		showToast('Please enter a project name');
+		return;
+	}
+	
+	const newProjectId = createProject(projectName);
+	populateProjectSelect();
+	el('projectSelect').value = newProjectId;
+	el('newProjectName').value = '';
+	
+	// Automatically add items to the new project
+	const itemsToAdd = new Map();
+	for (const key of state.selectedKeys) {
+		const row = state.rowIndex.get(key);
+		if (row) {
+			itemsToAdd.set(key, row);
+		}
+	}
+	
+	if (itemsToAdd.size > 0) {
+		const added = addToProject(newProjectId, itemsToAdd);
+		el('projectModal').style.display = 'none';
+		updateCartCount();
+		showToast(`Created project and added ${added} item${added === 1 ? '' : 's'}`);
+		state.selectedKeys.clear();
+		updateSelectedCount();
+		render();
+	}
+};
 	el('prev').onclick = ()=>{ if (state.page>1){ state.page--; render(); }};
 	el('next').onclick = ()=>{ const pages = Math.max(1, Math.ceil(state.rows.length / state.pageSize)); if (state.page<pages){ state.page++; render(); }};
 	el('pageSize').onchange = (e)=>{ state.pageSize = parseInt(e.target.value, 10) || 100; state.page = 1; render(); };

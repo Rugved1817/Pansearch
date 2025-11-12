@@ -185,10 +185,123 @@
 			90% { opacity: 1; transform: translateY(0); }
 			100% { opacity: 0; transform: translateY(12px); }
 		}
+		.project-selector {
+			position: relative;
+			display: inline-block;
+		}
+		.project-selector-btn {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 12px;
+			padding: 12px 16px;
+			background: rgba(12,19,27,0.8);
+			border: 1px solid var(--border);
+			border-radius: 12px;
+			color: var(--text);
+			font-size: 14px;
+			font-weight: 600;
+			cursor: pointer;
+			transition: all 0.2s ease;
+			min-width: 220px;
+		}
+		.project-selector-btn:hover {
+			border-color: var(--border-light);
+			background: rgba(12,19,27,0.95);
+		}
+		.project-selector-btn.active {
+			border-color: var(--accent);
+			box-shadow: 0 0 0 3px rgba(155,140,255,0.2);
+		}
+		.project-selector-btn .arrow {
+			transition: transform 0.2s ease;
+			font-size: 12px;
+			color: var(--muted);
+		}
+		.project-selector-btn.active .arrow {
+			transform: rotate(180deg);
+		}
+		.project-dropdown {
+			position: absolute;
+			top: calc(100% + 8px);
+			left: 0;
+			right: 0;
+			background: var(--panel);
+			border: 1px solid var(--border-light);
+			border-radius: 12px;
+			box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+			z-index: 1000;
+			display: none;
+			max-height: 400px;
+			overflow-y: auto;
+		}
+		.project-dropdown.show {
+			display: block;
+		}
+		.project-item {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			padding: 12px 16px;
+			cursor: pointer;
+			transition: all 0.2s ease;
+			border-bottom: 1px solid var(--border);
+		}
+		.project-item:last-child {
+			border-bottom: none;
+		}
+		.project-item:hover {
+			background: rgba(155,140,255,0.1);
+		}
+		.project-item.active {
+			background: rgba(155,140,255,0.15);
+			border-left: 3px solid var(--accent);
+		}
+		.project-item-info {
+			flex: 1;
+			min-width: 0;
+		}
+		.project-item-name {
+			font-weight: 600;
+			color: var(--text);
+			font-size: 14px;
+			margin-bottom: 2px;
+		}
+		.project-item-count {
+			font-size: 12px;
+			color: var(--muted);
+		}
+		.project-item-actions {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+		}
+		.project-delete-btn {
+			background: rgba(255,107,107,0.15);
+			border: 1px solid rgba(255,107,107,0.3);
+			color: #ff6b6b;
+			padding: 6px 10px;
+			border-radius: 8px;
+			font-size: 12px;
+			cursor: pointer;
+			transition: all 0.2s ease;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+		}
+		.project-delete-btn:hover {
+			background: rgba(255,107,107,0.25);
+			border-color: rgba(255,107,107,0.5);
+			transform: scale(1.05);
+		}
+		.project-delete-btn:active {
+			transform: scale(0.95);
+		}
 		@media (max-width: 720px) {
 			h1 { font-size: 26px; }
 			.card { padding: 20px; }
 			thead th, tbody td { padding: 12px; }
+			.project-selector-btn { min-width: 180px; }
 		}
 	</style>
 </head>
@@ -201,10 +314,25 @@
 
 		<div class="card">
 			<div class="cart-controls">
-				<span id="cartStatus" style="color: var(--muted); font-size: 14px;">Loading…</span>
-				<button id="btnExportCSV" class="btn">Export CSV</button>
-				<button id="btnExportPDF" class="btn">Export PDF</button>
-				<button id="btnClearCart" class="btn btn-danger">Clear Cart</button>
+				<div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+					<label style="color: var(--muted); font-size: 14px; font-weight: 600;">Project:</label>
+					<div class="project-selector">
+						<button id="projectSelectorBtn" class="project-selector-btn">
+							<span id="projectSelectorText">Loading...</span>
+							<span class="arrow">▼</span>
+						</button>
+						<div id="projectDropdown" class="project-dropdown">
+							<!-- Projects will be populated here -->
+						</div>
+					</div>
+					<button id="btnNewProject" class="btn" style="font-size: 12px; padding: 8px 14px;">+ New Project</button>
+				</div>
+				<div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+					<span id="cartStatus" style="color: var(--muted); font-size: 14px;">Loading…</span>
+					<button id="btnExportCSV" class="btn">Export CSV</button>
+					<button id="btnExportPDF" class="btn">Export PDF</button>
+					<button id="btnClearCart" class="btn btn-danger">Clear Project</button>
+				</div>
 			</div>
 			<div id="cartContent"></div>
 		</div>
@@ -213,7 +341,7 @@
 	<div id="toast" class="toast"></div>
 
 	<script>
-	const CART_STORAGE_KEY = 'pansearch_cart_v1';
+	const CART_STORAGE_KEY = 'pansearch_cart_v2';
 	const API_BASE = (location.protocol === 'file:') ? 'http://localhost:8000' : `${location.protocol}//${location.hostname || 'localhost'}:8000`;
 
 	const el = id => document.getElementById(id);
@@ -225,25 +353,76 @@
 		setTimeout(() => t.classList.remove('show'), 2400);
 	};
 
-	const loadCart = () => {
+	const getProjects = () => {
 		try {
 			const raw = localStorage.getItem(CART_STORAGE_KEY);
-			if (!raw) return new Map();
+			if (!raw) {
+				const defaultData = {
+					projects: { 'default': { name: 'Default Project', items: [] } },
+					currentProject: 'default'
+				};
+				localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(defaultData));
+				return defaultData;
+			}
 			const parsed = JSON.parse(raw);
-			return new Map(parsed.map(item => [item.key, item.row]));
+			// Migrate old format
+			if (Array.isArray(parsed)) {
+				const migrated = {
+					projects: { 'default': { name: 'Default Project', items: parsed } },
+					currentProject: 'default'
+				};
+				localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(migrated));
+				return migrated;
+			}
+			return parsed;
 		} catch (err) {
-			console.warn('Failed to load cart', err);
-			return new Map();
+			console.warn('Failed to load projects', err);
+			return {
+				projects: { 'default': { name: 'Default Project', items: [] } },
+				currentProject: 'default'
+			};
 		}
 	};
 
-	const saveCart = (map) => {
+	const saveProjects = (projectsData) => {
 		try {
-			const payload = Array.from(map.entries()).map(([key, row]) => ({ key, row }));
-			localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(payload));
+			localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(projectsData));
 		} catch (err) {
-			console.warn('Failed to save cart', err);
+			console.warn('Failed to save projects', err);
 		}
+	};
+
+	const getCurrentProject = () => {
+		const data = getProjects();
+		return data.currentProject || 'default';
+	};
+
+	const setCurrentProject = (projectId) => {
+		const data = getProjects();
+		data.currentProject = projectId;
+		saveProjects(data);
+	};
+
+	const getProjectItems = (projectId) => {
+		const data = getProjects();
+		const project = data.projects[projectId || data.currentProject];
+		if (!project) return new Map();
+		return new Map(project.items.map(item => [item.key, item.row]));
+	};
+
+	const loadCart = () => {
+		const currentProjectId = getCurrentProject();
+		return getProjectItems(currentProjectId);
+	};
+
+	const saveCart = (map) => {
+		const data = getProjects();
+		const currentProjectId = getCurrentProject();
+		if (!data.projects[currentProjectId]) {
+			data.projects[currentProjectId] = { name: 'Default Project', items: [] };
+		}
+		data.projects[currentProjectId].items = Array.from(map.entries()).map(([key, row]) => ({ key, row }));
+		saveProjects(data);
 	};
 
 	const formatField = (row, keys) => {
@@ -259,9 +438,14 @@
 const exportCartCSV = () => {
 	const cart = loadCart();
 	if (!cart.size) {
-		showToast('Cart is empty');
+		showToast('Project is empty');
 		return;
 	}
+	const data = getProjects();
+	const currentProjectId = getCurrentProject();
+	const project = data.projects[currentProjectId];
+	const projectName = project ? project.name.replace(/[^a-z0-9]/gi, '_').toLowerCase() : 'project';
+	
 	const headers = ['PAN', 'Buyer', 'Seller', 'Doc No', 'Year'];
 	const rows = [headers.join(',')];
 	for (const [, row] of cart.entries()) {
@@ -281,7 +465,7 @@ const exportCartCSV = () => {
 	const url = URL.createObjectURL(blob);
 	const a = document.createElement('a');
 	a.href = url;
-	a.download = `cart_${new Date().toISOString().split('T')[0]}.csv`;
+	a.download = `${projectName}_${new Date().toISOString().split('T')[0]}.csv`;
 	a.click();
 	URL.revokeObjectURL(url);
 	showToast('CSV exported');
@@ -290,9 +474,14 @@ const exportCartCSV = () => {
 const exportCartPDF = async () => {
 	const cart = loadCart();
 	if (!cart.size) {
-		showToast('Cart is empty');
+		showToast('Project is empty');
 		return;
 	}
+	const data = getProjects();
+	const currentProjectId = getCurrentProject();
+	const project = data.projects[currentProjectId];
+	const projectName = project ? project.name.replace(/[^a-z0-9]/gi, '_').toLowerCase() : 'project';
+	
 	try {
 		const res = await fetch(`${API_BASE}/export_pdf`, {
 			method: 'POST',
@@ -304,7 +493,7 @@ const exportCartPDF = async () => {
 		const url = URL.createObjectURL(blob);
 		const a = document.createElement('a');
 		a.href = url;
-		a.download = `cart_report_${new Date().toISOString().split('T')[0]}.pdf`;
+		a.download = `${projectName}_${new Date().toISOString().split('T')[0]}.pdf`;
 		a.click();
 		URL.revokeObjectURL(url);
 		showToast('PDF exported');
@@ -314,15 +503,112 @@ const exportCartPDF = async () => {
 	}
 };
 
+	const populateProjectSelect = () => {
+		const dropdown = el('projectDropdown');
+		const selectorText = el('projectSelectorText');
+		if (!dropdown || !selectorText) return;
+		
+		const data = getProjects();
+		const currentProjectId = data.currentProject || 'default';
+		const currentProject = data.projects[currentProjectId];
+		
+		// Update selector button text
+		if (currentProject) {
+			selectorText.textContent = `${currentProject.name} (${currentProject.items.length})`;
+		} else {
+			selectorText.textContent = 'Select Project';
+		}
+		
+		// Populate dropdown
+		dropdown.innerHTML = '';
+		for (const [projectId, project] of Object.entries(data.projects)) {
+			const item = document.createElement('div');
+			item.className = `project-item ${projectId === currentProjectId ? 'active' : ''}`;
+			item.onclick = (e) => {
+				// Don't switch if clicking delete button
+				if (e.target.closest('.project-delete-btn')) return;
+				setCurrentProject(projectId);
+				populateProjectSelect();
+				renderCart();
+				el('projectDropdown').classList.remove('show');
+				el('projectSelectorBtn').classList.remove('active');
+				showToast('Switched project');
+			};
+			
+			const info = document.createElement('div');
+			info.className = 'project-item-info';
+			
+			const name = document.createElement('div');
+			name.className = 'project-item-name';
+			name.textContent = project.name;
+			
+			const count = document.createElement('div');
+			count.className = 'project-item-count';
+			count.textContent = `${project.items.length} item${project.items.length === 1 ? '' : 's'}`;
+			
+			info.appendChild(name);
+			info.appendChild(count);
+			
+			const actions = document.createElement('div');
+			actions.className = 'project-item-actions';
+			
+			// Only show delete if there's more than one project
+			if (Object.keys(data.projects).length > 1) {
+				const deleteBtn = document.createElement('button');
+				deleteBtn.className = 'project-delete-btn';
+				deleteBtn.innerHTML = '🗑️';
+				deleteBtn.title = 'Delete project';
+				deleteBtn.onclick = (e) => {
+					e.stopPropagation();
+					if (!confirm(`Delete "${project.name}"? This will permanently remove all ${project.items.length} item${project.items.length === 1 ? '' : 's'} in this project.`)) {
+						return;
+					}
+					
+					const data = getProjects();
+					delete data.projects[projectId];
+					
+					// If we deleted the current project, switch to another one
+					if (projectId === data.currentProject) {
+						const remainingProjects = Object.keys(data.projects);
+						if (remainingProjects.length > 0) {
+							data.currentProject = remainingProjects[0];
+						} else {
+							// Create a default project if we deleted the last one
+							data.projects['default'] = { name: 'Default Project', items: [] };
+							data.currentProject = 'default';
+						}
+					}
+					
+					saveProjects(data);
+					populateProjectSelect();
+					renderCart();
+					el('projectDropdown').classList.remove('show');
+					el('projectSelectorBtn').classList.remove('active');
+					showToast('Project deleted');
+				};
+				actions.appendChild(deleteBtn);
+			}
+			
+			item.appendChild(info);
+			item.appendChild(actions);
+			dropdown.appendChild(item);
+		}
+	};
+
 	const renderCart = () => {
 		const content = el('cartContent');
 		const status = el('cartStatus');
 		const cart = loadCart();
 		const size = cart.size;
-		status.textContent = `${size} item${size === 1 ? '' : 's'}`;
+		const currentProjectId = getCurrentProject();
+		const data = getProjects();
+		const project = data.projects[currentProjectId];
+		const projectName = project ? project.name : 'Unknown Project';
+		
+		status.textContent = `${size} item${size === 1 ? '' : 's'} in "${projectName}"`;
 
 		if (!size) {
-			content.innerHTML = '<p class="cart-empty">Cart is empty. Go back to the search page and add transactions to your cart.</p>';
+			content.innerHTML = '<p class="cart-empty">This project is empty. Go back to the search page and add transactions to your cart.</p>';
 			return;
 		}
 
@@ -360,10 +646,14 @@ const exportCartPDF = async () => {
 			removeBtn.className = 'cart-remove';
 			removeBtn.textContent = 'Remove';
 			removeBtn.onclick = () => {
-				cart.delete(key);
-				saveCart(cart);
+				const data = getProjects();
+				const currentProjectId = getCurrentProject();
+				if (data.projects[currentProjectId]) {
+					data.projects[currentProjectId].items = data.projects[currentProjectId].items.filter(item => item.key !== key);
+					saveProjects(data);
+				}
 				renderCart();
-				showToast('Removed from cart');
+				showToast('Removed from project');
 			};
 			actionTd.appendChild(removeBtn);
 			tr.appendChild(actionTd);
@@ -379,15 +669,59 @@ const exportCartPDF = async () => {
 	el('btnClearCart').onclick = () => {
 		const cart = loadCart();
 		if (!cart.size) {
-			showToast('Cart is already empty');
+			showToast('Project is already empty');
 			return;
 		}
-		if (!confirm('Clear all items from the cart?')) return;
-		localStorage.removeItem(CART_STORAGE_KEY);
+		if (!confirm('Clear all items from this project?')) return;
+		const data = getProjects();
+		const currentProjectId = getCurrentProject();
+		if (data.projects[currentProjectId]) {
+			data.projects[currentProjectId].items = [];
+			saveProjects(data);
+		}
 		renderCart();
-		showToast('Cart cleared');
+		showToast('Project cleared');
 	};
 
+	// Toggle dropdown
+	el('projectSelectorBtn').onclick = (e) => {
+		e.stopPropagation();
+		const dropdown = el('projectDropdown');
+		const btn = el('projectSelectorBtn');
+		const isOpen = dropdown.classList.contains('show');
+		
+		if (isOpen) {
+			dropdown.classList.remove('show');
+			btn.classList.remove('active');
+		} else {
+			dropdown.classList.add('show');
+			btn.classList.add('active');
+		}
+	};
+	
+	// Close dropdown when clicking outside
+	document.addEventListener('click', (e) => {
+		const selector = document.querySelector('.project-selector');
+		if (selector && !selector.contains(e.target)) {
+			el('projectDropdown').classList.remove('show');
+			el('projectSelectorBtn').classList.remove('active');
+		}
+	});
+
+	el('btnNewProject').onclick = () => {
+		const name = prompt('Enter project name:');
+		if (!name || !name.trim()) return;
+		const data = getProjects();
+		const projectId = `project_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+		data.projects[projectId] = { name: name.trim(), items: [] };
+		data.currentProject = projectId;
+		saveProjects(data);
+		populateProjectSelect();
+		renderCart();
+		showToast('Project created');
+	};
+
+	populateProjectSelect();
 	renderCart();
 	el('btnExportCSV').onclick = exportCartCSV;
 	el('btnExportPDF').onclick = exportCartPDF;
