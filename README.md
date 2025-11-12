@@ -11,11 +11,12 @@ This project builds an advanced search system over large transaction data (~20M+
 - Columnar storage (Parquet) + DuckDB for fast scans and simple indexing
 
 ### Project Layout
-- `src/config.py`: Configure column names and thresholds
-- `src/utils/nlp.py`: Normalization, transliteration, phonetic keys, fuzzy scoring
-- `src/ingest.py`: Convert CSV to Parquet with derived columns for names/phonetics
-- `src/build_index.py`: Build DuckDB database and helper indexes
-- `src/search.py`: CLI entrypoint implementing the 4-step search workflow
+- `backend/config.py`: Configure column names and thresholds
+- `backend/utils/nlp.py`: Normalization, transliteration, phonetic keys, fuzzy scoring
+- `backend/ingest.py`: Convert CSV to Parquet with derived columns for names/phonetics
+- `backend/build_index.py`: Build DuckDB database and helper indexes
+- `backend/search.py`: CLI entrypoint implementing the 4-step search workflow
+- `backend/api.py`: FastAPI server for web interface
 
 ### Install
 ```bash
@@ -25,7 +26,7 @@ pip install -r requirements.txt
 ```
 
 ### Configure
-Edit `src/config.py` to match your CSV columns and thresholds. Default expected columns:
+Edit `backend/config.py` to match your CSV columns and thresholds. Default expected columns:
 - `pan` (string)
 - `name` (string, full name)
 - `age` (int or string)
@@ -35,29 +36,35 @@ Edit `src/config.py` to match your CSV columns and thresholds. Default expected 
 ### Ingest
 Converts CSV to partitioned Parquet and derives helper columns (`name_norm`, `name_lang`, `name_phonetic`):
 ```bash
-python src/ingest.py --csv "path/to/transactions.csv" --out "data/parquet" --rows-per-file 2000000
+python backend/ingest.py --csv "path/to/transactions.csv" --out "data/parquet" --rows-per-file 2000000
 ```
 
 ### Build Index
 Creates a DuckDB database that references Parquet files and builds helper views:
 ```bash
-python src/build_index.py --parquet "data/parquet" --db "data/tx.duckdb"
+python backend/build_index.py --parquet "data/parquet" --db "data/tx.duckdb"
 ```
 
 ### Search
 Run the 4-step search from a PAN input:
 ```bash
-python src/search.py --db "data/tx.duckdb" --pan "ABCDE1234F"
+python backend/search.py --db "data/tx.duckdb" --pan "ABCDE1234F"
 ```
 You can also input Marathi PAN holder names by PAN or seed name. For seed-name search:
 ```bash
-python src/search.py --db "data/tx.duckdb" --seed-name "चिरायु संजय गिरी"
+python backend/search.py --db "data/tx.duckdb" --seed-name "चिरायु संजय गिरी"
+```
+
+### API Server
+Start the FastAPI server for the web interface:
+```bash
+uvicorn backend.api:app --reload --host 0.0.0.0 --port 8000
 ```
 
 ### Performance Tips
 - Use `--rows-per-file` during ingest to balance file sizes (100MB–512MB per Parquet file recommended)
 - Place `data/` on a fast SSD
-- Adjust `CANDIDATE_LIMIT` and thresholds in `src/config.py`
+- Adjust `CANDIDATE_LIMIT` and thresholds in `backend/config.py`
 - Prefer running searches with a PAN when possible; name-only searches are heavier
 
 ### Notes
