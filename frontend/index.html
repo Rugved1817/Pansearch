@@ -973,6 +973,7 @@ function setLoading(on){
 							const n = Number(parsed);
 							metaAgeNum = Number.isFinite(n) ? n : null;
 						}
+						const metaNames = Array.isArray(ej.names) ? ej.names.filter(n => typeof n === 'string' && n.trim()) : [];
 						
 						// Calculate current age based on year from first transaction
 						// Formula: current_age = age_at_transaction + (current_year - transaction_year)
@@ -997,8 +998,14 @@ function setLoading(on){
 						
 						if (metaName != null || metaAgeNum != null) {
 							for (const r of state.allRows) { 
-								r["Name"] = metaName ?? ''; 
+								if (metaName != null) r["Name"] = metaName ?? '';
 								r["Age"] = (metaAgeNum != null) ? currentAge : ''; 
+							}
+						}
+						if (metaNames.length) {
+							for (const r of state.allRows) {
+								r.names_llm = metaNames.slice();
+								r.Name = metaNames.join(', ');
 							}
 						}
 							// Show name badge; label as Extracted only if extracted_name present

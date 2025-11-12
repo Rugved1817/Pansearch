@@ -53,6 +53,7 @@ logger = logging.getLogger("pansearch.api")
 
 # Global font registration cache
 _DEVANAGARI_FONTS = None
+_LLM_NAME_CACHE: dict[str, list[str]] = {}
 
 app = FastAPI(title="Transactions Search API", version="0.1.0")
 app.add_middleware(
@@ -460,15 +461,10 @@ def search(
 		con.close()
 
 
-def _extract_person_name_llm(raw_name: str) -> Optional[str]:
-	"""
-	Use local LLM (OpenAI-compatible API via Ollama) to extract the main human person's name
-	from a longer Marathi/English phrase. Returns a concise name or None on failure.
-	"""
-	if not raw_name:
-		return None
+def _extract_person_names_llm(raw_text: str) -> list[str]:
+	if not raw_text:
+		return []
 	try:
-		# Create custom httpx client to avoid proxies parameter issue
 		http_client = httpx.Client(timeout=30.0)
 		client = OpenAI(
 			base_url="http://192.168.1.198:11434/v1",
@@ -477,12 +473,24 @@ def _extract_person_name_llm(raw_name: str) -> Optional[str]:
 		)
 		system_prompt = "Return JSON only. You extract concise person names."
 		user_prompt = (
-			"Extract only the main human person's name from the text.\n"
-			"- Text may include roles (e.g., संचालक, तर्फे), organizations, or punctuation.\n"
-			"- Preserve the script (Marathi remains Marathi, English remains English).\n"
-			"- Respond ONLY as compact JSON: {\\\"name\\\": \\\"<NAME>\\\"}. No extra text.\n\n"
-			f"Text: {raw_name}"
+			"You are an intelligent name extraction assistant.\n"
+			"Your task is to extract **all human names** mentioned in the given text input.\n"
+			"The input text may contain Marathi, Hindi, or English words — or a mix of them.\n\n"
+			"### Follow these rules strictly:\n"
+			"1. Extract only human names.\n"
+			"   - Include *all* person names, whether individuals or representatives of organizations.\n"
+			"   - Exclude company names, organization names, places, or designations unless they are part of a person’s full name.\n"
+			"2. Each extracted name must be complete.\n"
+			"   - Preserve first name, middle name, and last name if available.\n"
+			"   - Do not split parts of one name into multiple names.\n"
+			"3. Preserve the script — Marathi names should remain in Marathi, English names in English.\n"
+			"4. Respond ONLY as compact JSON array. Example:\n"
+			'   [{"name": "यश रितेश मुठा"}, {"name": "अजित भोईर"}]\n'
+			"5. If no human name is found, return an empty array: []\n\n"
+			"Text may include roles (e.g., संचालक, तर्फे), organizations, or punctuation.\n\n"
+			f"Text: {raw_text}"
 		)
+
 		resp = client.chat.completions.create(
 			model="gpt-oss:20b",
 			messages=[
@@ -494,34 +502,73 @@ def _extract_person_name_llm(raw_name: str) -> Optional[str]:
 		text = (resp.choices[0].message.content or "").strip()
 		if not text:
 			logger.warning("LLM returned empty content for extraction")
-		# Parse JSON strictly; tolerate minor wrappers
-		name_val = None
+
+		names: list[str] = []
 		try:
 			obj = json.loads(text)
-			name_val = obj.get("name")
+			if isinstance(obj, list):
+				for entry in obj:
+					if isinstance(entry, str) and entry.strip():
+						names.append(entry.strip())
+					elif isinstance(entry, dict):
+						val = entry.get("name")
+						if isinstance(val, str) and val.strip():
+							names.append(val.strip())
+			elif isinstance(obj, dict):
+				val = obj.get("name")
+				if isinstance(val, str) and val.strip():
+					names.append(val.strip())
 		except Exception:
-			# try to find a minimal JSON snippet in the text
-			m = re.search(r"\{\s*\"name\"\s*:\s*\"(.+?)\"\s*\}", text)
-			if m:
-				name_val = m.group(1)
-		if name_val:
-			name_val = str(name_val).strip().strip('"\'\u201c\u201d')
-			if 0 < len(name_val) <= 60:
-				return name_val
-		# Fallback heuristic for Marathi phrases: pick last 2 tokens that are not role/stop words
-		stop = {"चे","चा","ची","चे","प्रा","ली","लि","अँड","एंड","तर्फे","संचालक","मुखत्यार","प्रा.","लि.","कंपनी","लिमिटेड","प्रा.लि."}
-		words = re.split(r"\s+", raw_name.strip())
+			matches = re.findall(r"\{\s*\"name\"\s*:\s*\"(.+?)\"\s*\}", text)
+			for match in matches:
+				val = match.strip().strip('"\'\u201c\u201d')
+				if val:
+					names.append(val)
+			if not names and text.startswith("[") and text.endswith("]"):
+				try:
+					raw_list = json.loads(text.replace("'", '"'))
+					if isinstance(raw_list, list):
+						for item in raw_list:
+							if isinstance(item, str) and item.strip():
+								names.append(item.strip())
+				except Exception:
+					pass
+
+		names = [n.strip().strip('"\'\u201c\u201d') for n in names if isinstance(n, str) and n.strip()]
+		names = [n for n in names if 0 < len(n) <= 80]
+		if names:
+			seen = set()
+			unique: list[str] = []
+			for n in names:
+				if n not in seen:
+					seen.add(n)
+					unique.append(n)
+			return unique
+
+		stop = {"चे", "चा", "ची", "चे", "प्रा", "ली", "लि", "अँड", "एंड", "तर्फे", "संचालक", "मुखत्यार", "प्रा.", "लि.", "कंपनी", "लिमिटेड", "प्रा.लि."}
+		words = re.split(r"\s+", raw_text.strip())
 		filtered = [w for w in words if w and (re.sub(r"[\,;:\-]", "", w) not in stop)]
-		if len(filtered) >= 1:
+		if filtered:
 			cand = " ".join(filtered[-2:]) if len(filtered) >= 2 else filtered[-1]
 			cand = cand.strip()
-			if 0 < len(cand) <= 60:
+			if 0 < len(cand) <= 80:
 				logger.info("LLM fallback heuristic used for extraction")
-				return cand
-		return None
+				return [cand]
+		return []
 	except Exception as e:
 		logger.exception("LLM extraction failed: %s", e)
-		return None
+		return []
+
+
+def _get_llm_names_cached(text: str) -> list[str]:
+	key = (text or "").strip()
+	if not key:
+		return []
+	if key in _LLM_NAME_CACHE:
+		return _LLM_NAME_CACHE[key]
+	names = _extract_person_names_llm(key)
+	_LLM_NAME_CACHE[key] = names
+	return names
 
 
 @app.get("/pan_meta")
@@ -552,11 +599,20 @@ def pan_meta(pan: str = Query(..., description="PAN to fetch metadata for")) -> 
 				age = age_num
 			except Exception:
 				pass
-		# Return raw name without LLM extraction
+		names_llm = _get_llm_names_cached(name or "") if name else []
 		extracted = None
 		final_name = name
 		extraction_error = None
-		return {"pan": pan_id, "name": final_name, "extracted_name": extracted, "raw_name": name, "age": age, "raw": data, "extraction_error": extraction_error}
+		return {
+			"pan": pan_id,
+			"name": final_name,
+			"extracted_name": extracted,
+			"names": names_llm,
+			"raw_name": name,
+			"age": age,
+			"raw": data,
+			"extraction_error": extraction_error,
+		}
 	except Exception as e:
 		logger.exception("PAN meta upstream error for %s: %s", pan_id, e)
 		raise HTTPException(status_code=502, detail=f"upstream error: {e}")
@@ -566,11 +622,11 @@ def pan_meta(pan: str = Query(..., description="PAN to fetch metadata for")) -> 
 def llm_test(text: str = Query(..., description="Sample text to extract name from")) -> dict:
 	"""Simple endpoint to verify LLM extraction end-to-end."""
 	try:
-		extracted = _extract_person_name_llm(text)
-		return {"input": text, "extracted": extracted}
+		names = _extract_person_names_llm(text)
+		return {"input": text, "names": names}
 	except Exception as e:
 		logger.exception("LLM test failed: %s", e)
-		return {"input": text, "extracted": None}
+		return {"input": text, "names": []}
 
 
 # -------------------- PDF Generation with Devanagari Support --------------------
@@ -1473,6 +1529,18 @@ def export_pdf(
 				property_type = "Both"
 			
 			row["property_type"] = property_type
+			
+			name_sources: list[str] = []
+			for field in ("Name", "name_extracted", "_name_primary", "_name_alt", "buyer", "seller"):
+				val = row.get(field)
+				if isinstance(val, str) and val.strip():
+					name_sources.append(val.strip())
+			if name_sources:
+				combined_text = " | ".join(name_sources)
+				names_llm = _get_llm_names_cached(combined_text)
+				if names_llm:
+					row["names_llm"] = names_llm
+					row["Name"] = ", ".join(names_llm)
 		
 		# Define columns for PDF
 		if payload and rows:
