@@ -415,7 +415,7 @@ def _extract_person_names_llm(raw_text: str) -> list[str]:
 	if not raw_text:
 		return []
 	try:
-		http_client = httpx.Client(timeout=30.0)
+		http_client = httpx.Client(timeout=120.0)
 		client = OpenAI(
 			base_url="http://192.168.1.198:11434/v1",
 			api_key="ollama",
