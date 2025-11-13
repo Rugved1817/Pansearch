@@ -67,7 +67,8 @@ uvicorn backend.api:app --reload --host 0.0.0.0 --port 8000
 - Adjust `CANDIDATE_LIMIT` and thresholds in `backend/config.py`
 - Prefer running searches with a PAN when possible; name-only searches are heavier
 
-### Notes
+### Notes:
+
 - Double Metaphone is leveraged for English; Marathi is transliterated to Latin before phonetic hashing. We combine phonetic blocking with fuzzy ratios to handle small spelling/orthographic variations.
 - For production-scale recall, consider adding a vector store on top of character n-gram embeddings of names and addresses.
 
